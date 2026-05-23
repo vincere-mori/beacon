@@ -56,6 +56,10 @@ import kotlin.system.exitProcess
 import app.beacon.desktop.BeaconTheme as T
 
 fun main() {
+    // Refresh Windows icon cache so Start Menu always shows the correct icon
+    // right after install without needing a reboot.
+    runCatching { ProcessBuilder("ie4uinit.exe", "-show").start() }
+
     // Enable FlatLaf to draw the window titlebar (instead of Windows DWM)
     // so our brand colours actually apply to the title strip and buttons.
     System.setProperty("flatlaf.useWindowDecorations", "true")
