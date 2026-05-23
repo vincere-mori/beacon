@@ -97,7 +97,6 @@ Reset-Directory $TempOutput
     --win-dir-chooser `
     --win-menu `
     --win-shortcut `
-    --win-per-user-install `
     --win-upgrade-uuid "6B9A3E90-9B7E-4D1D-9C32-5E3F3A6E4F51" `
     --java-options "-Dfile.encoding=UTF-8"
 
