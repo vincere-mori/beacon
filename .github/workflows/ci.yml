@@ -57,7 +57,7 @@ jobs:
         shell: pwsh
         run: |
           .\gradlew.bat :core:test :desktop:test :desktop:installDist
-          .\dev\package-windows.ps1 -Version "0.1.5" -SkipBuild
+          .\dev\package-windows.ps1 -Version "0.2.0" -SkipBuild
 
       - name: Upload installer
         uses: actions/upload-artifact@v4
