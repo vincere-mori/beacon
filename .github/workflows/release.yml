@@ -59,8 +59,9 @@ jobs:
       - name: Build installer
         shell: pwsh
         run: |
+          $version = $env:GITHUB_REF_NAME -replace '^v',''
           .\gradlew.bat :core:test :desktop:test :desktop:installDist
-          .\dev\package-windows.ps1 -Version "${env:GITHUB_REF_NAME}" -SkipBuild
+          .\dev\package-windows.ps1 -Version $version -SkipBuild
 
       - name: Upload installer
         uses: actions/upload-artifact@v4
@@ -73,6 +74,9 @@ jobs:
     needs: [android, windows]
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
@@ -86,5 +90,6 @@ jobs:
           gh release create "${GITHUB_REF_NAME}" \
             "release/Beacon-Android-${GITHUB_REF_NAME}.apk" \
             release/beacon-windows/Beacon-Windows-*.exe \
+            --repo "${GITHUB_REPOSITORY}" \
             --title "Beacon ${GITHUB_REF_NAME}" \
             --generate-notes
