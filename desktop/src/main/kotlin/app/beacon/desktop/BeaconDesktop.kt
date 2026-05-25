@@ -173,7 +173,6 @@ class BeaconDesktop(
     private val latencyProbe = LatencyProbe()
     private var trafficMonitor: TrafficMonitor? = null
     private val pingTimer = Timer(5000) { runPing() }
-    private val statsAnimTimer = Timer(33) { /* repaint stats */ }
     private var pinging = false
 
     fun show() {

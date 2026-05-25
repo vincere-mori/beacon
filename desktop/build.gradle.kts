@@ -14,6 +14,17 @@ application {
 
 tasks.named<JavaExec>("run") {
     workingDir = rootProject.projectDir
+    // те же ограничения памяти, что и в собранных бандлах (см. dev/package-*)
+    jvmArgs(
+        "-Xmx128m",
+        "-Xms16m",
+        "-XX:+UseSerialGC",
+        "-XX:MaxMetaspaceSize=96m",
+        "-XX:ReservedCodeCacheSize=48m",
+        "-XX:+DisableExplicitGC",
+        "-XX:MinHeapFreeRatio=10",
+        "-XX:MaxHeapFreeRatio=20",
+    )
 }
 
 dependencies {

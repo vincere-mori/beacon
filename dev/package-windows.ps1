@@ -24,8 +24,23 @@ $BuildDir = Join-Path $Repo "build"
 $ToolsDir = Join-Path $BuildDir "tools"
 $PackageDir = Join-Path $BuildDir "windows-package"
 $InputDir = Join-Path $PackageDir "input"
+$RuntimeDir = Join-Path $PackageDir "runtime"
 $ReleaseDir = Join-Path $BuildDir "release"
 $IconPath = Join-Path $Repo "desktop\src\main\resources\icon.ico"
+
+# Минимальный набор JDK-модулей: java.desktop для Swing/AWT/FlatLaf,
+# jdk.unsupported для sun.misc.Unsafe (JNA), jdk.crypto.ec для X25519
+# (WarpManager), java.naming для TLS handshake (HttpsURLConnection),
+# jdk.localedata для локалей. Этого достаточно для текущего функционала.
+$JlinkModules = "java.base,java.desktop,java.logging,java.naming,java.management,jdk.unsupported,jdk.crypto.ec,jdk.localedata,jdk.zipfs"
+
+# JVM-флаги под Swing-приложение с малым heap'ом: SerialGC экономит RSS
+# по сравнению с G1, ограничения metaspace/code cache держат рабочий
+# набор в пределах ~80-120 МБ. DisableExplicitGC чтобы библиотеки не
+# вызывали полную сборку через System.gc(). MinHeapFreeRatio/Max - JVM
+# возвращает неиспользуемый heap в ОС когда клиент в простое (RSS падает
+# при минимизации/idle до ~60 МБ).
+$JavaOptions = "-Dfile.encoding=UTF-8 -Xmx128m -Xms16m -XX:+UseSerialGC -XX:MaxMetaspaceSize=96m -XX:ReservedCodeCacheSize=48m -XX:+DisableExplicitGC -XX:MinHeapFreeRatio=10 -XX:MaxHeapFreeRatio=20"
 
 # SHA-256 of wix311-binaries.zip (wixtoolset/wix3 release wix3112rtm).
 $WixSha256 = "2c1888d5d1dba377fc7fa14444cf556963747ff9a0a289a3599cf09da03b9e2e"
@@ -83,6 +98,19 @@ Copy-Item (Join-Path $LibDir "*") $InputDir -Recurse -Force
 $TempOutput = Join-Path $PackageDir "output"
 Reset-Directory $TempOutput
 
+# Собираем урезанный runtime через jlink: вместо полного JDK (~200 МБ)
+# получаем образ ~50 МБ только с нужными модулями. jpackage потом
+# берёт его через --runtime-image вместо генерации своего.
+if (Test-Path $RuntimeDir) { Remove-Item -LiteralPath $RuntimeDir -Recurse -Force }
+& jlink `
+    --strip-debug `
+    --no-header-files `
+    --no-man-pages `
+    --compress=2 `
+    --add-modules $JlinkModules `
+    --output $RuntimeDir
+if ($LASTEXITCODE -ne 0) { throw "jlink failed" }
+
 & jpackage `
     --type exe `
     --name Beacon `
@@ -90,6 +118,7 @@ Reset-Directory $TempOutput
     --vendor Beacon `
     --description "VLESS Reality client" `
     --input $InputDir `
+    --runtime-image $RuntimeDir `
     --main-jar desktop.jar `
     --main-class app.beacon.desktop.BeaconDesktopKt `
     --icon $IconPath `
@@ -98,7 +127,7 @@ Reset-Directory $TempOutput
     --win-menu `
     --win-shortcut `
     --win-upgrade-uuid "6B9A3E90-9B7E-4D1D-9C32-5E3F3A6E4F51" `
-    --java-options "-Dfile.encoding=UTF-8"
+    --java-options $JavaOptions
 
 $Installer = Get-ChildItem $TempOutput -Filter "*.exe" | Select-Object -First 1
 if ($null -eq $Installer) {
