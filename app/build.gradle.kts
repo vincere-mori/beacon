@@ -62,7 +62,7 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.8.1")
 
-    implementation("net.clever-vpn:libbox-android:2.1.0")
+    implementation("net.clever-vpn:libbox-android:2.1.1")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 
