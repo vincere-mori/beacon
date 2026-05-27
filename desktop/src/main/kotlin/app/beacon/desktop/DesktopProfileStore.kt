@@ -46,7 +46,9 @@ data class DesktopProfileState(
     val inboundMode: InboundMode = InboundMode.Mixed,
     val warpEnabled: Boolean = false,
     val warpCredentials: WarpCredentials? = null,
-    val trayEnabled: Boolean = false
+    val trayEnabled: Boolean = true,
+    val language: AppLanguage = AppLanguage.RU,
+    val trayNoticeShown: Boolean = false
 ) {
     /** Every server the user has — standalone keys and subscription servers. */
     val allProfiles: List<ProxyProfile>

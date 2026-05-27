@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.3.3
+
+- Desktop: refined main layout with key selection above connection modes.
+- Desktop: split WARP from Proxy/TUN because it is an extra route, not a base mode.
+- Desktop: calmer traffic strip for ping, incoming and outgoing speed.
+- Desktop: styled "already running" dialog.
+- Desktop: smoother menu and fullscreen animation timing.
+- Desktop: redesigned lighthouse model while keeping the main beam exposure.
+
 ## v0.3.2
 
 - Desktop: adaptive window size for smaller laptop screens.

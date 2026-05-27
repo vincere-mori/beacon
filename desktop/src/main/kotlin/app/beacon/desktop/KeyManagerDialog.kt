@@ -38,14 +38,18 @@ class KeyManagerDialog(
     private var profiles: List<ProxyProfile>,
     private var activeId: String?,
     private val onChange: (List<ProxyProfile>, String?) -> Unit
-) : JDialog(owner, "Ключи", true) {
+) : JDialog(owner, L.t("Ключи", "Keys"), true) {
 
     private val model = DefaultListModel<ProxyProfile>()
     private val list = JList(model)
     private val keyInput = JTextArea()
     private val emptyHint = JLabel(
-        "<html><div style='text-align:center;color:#7B8EAD'>" +
-        "Здесь будут сохранённые ключи.<br>Вставь vless://... ссылку выше и нажми «Сохранить».</div></html>",
+        L.t(
+            "<html><div style='text-align:center;color:#7B8EAD'>" +
+            "Здесь будут сохранённые ключи.<br>Вставь vless://... ссылку выше и нажми «Сохранить».</div></html>",
+            "<html><div style='text-align:center;color:#7B8EAD'>" +
+            "Saved keys will appear here.<br>Paste vless://... link above and click \"Save\".</div></html>"
+        ),
         SwingConstants.CENTER
     )
 
@@ -75,9 +79,9 @@ class KeyManagerDialog(
     private fun header(): JPanel = JPanel().apply {
         isOpaque = false
         layout = BoxLayout(this, BoxLayout.Y_AXIS)
-        add(JLabel("Ключи").apply { foreground = T.TEXT; font = font.deriveFont(Font.BOLD, 22f); alignmentX = 0f })
+        add(JLabel(L.t("Ключи", "Keys")).apply { foreground = T.TEXT; font = font.deriveFont(Font.BOLD, 22f); alignmentX = 0f })
         add(Box.createVerticalStrut(4))
-        add(JLabel("вставь vless:// Reality ссылку — она сразу станет активной").apply {
+        add(JLabel(L.t("вставь vless:// Reality ссылку — она сразу станет активной", "paste vless:// Reality link — it will immediately become active")).apply {
             foreground = T.MUTED; font = font.deriveFont(Font.PLAIN, 12f); alignmentX = 0f
         })
         add(Box.createVerticalStrut(16))
@@ -102,13 +106,21 @@ class KeyManagerDialog(
             border = BorderFactory.createLineBorder(T.BORDER)
             viewport.background = T.BG_INPUT
         }
+        keyInput.addFocusListener(object : java.awt.event.FocusListener {
+            override fun focusGained(e: java.awt.event.FocusEvent) {
+                scroll.border = BorderFactory.createLineBorder(T.ACCENT, 1)
+            }
+            override fun focusLost(e: java.awt.event.FocusEvent) {
+                scroll.border = BorderFactory.createLineBorder(T.BORDER)
+            }
+        })
         add(scroll, BorderLayout.CENTER)
 
         val btnRow = JPanel().apply {
             isOpaque = false
             layout = BoxLayout(this, BoxLayout.X_AXIS)
             add(Box.createHorizontalGlue())
-            add(T.accentButton("Сохранить").apply {
+            add(T.accentButton(L.t("Сохранить", "Save")).apply {
                 addActionListener { save() }
                 preferredSize = Dimension(148, 38)
                 maximumSize  = Dimension(148, 38)
@@ -124,12 +136,12 @@ class KeyManagerDialog(
 
         list.apply {
             selectionMode = ListSelectionModel.SINGLE_SELECTION
-            fixedCellHeight = 62
-            background = T.BG_INPUT; foreground = T.TEXT
-            border = EmptyBorder(4, 0, 4, 0)
+            fixedCellHeight = 66
+            background = T.CARD_SOLID
+            border = EmptyBorder(4, 4, 4, 4)
             cellRenderer = javax.swing.ListCellRenderer<ProxyProfile> { l, value, _, isSelected, _ ->
                 val r = Row(value, isSelected, value.id == activeId)
-                r.preferredSize = Dimension(l.width, 62)
+                r.preferredSize = Dimension(l.width, 66)
                 r as Component
             }
             cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
@@ -139,7 +151,7 @@ class KeyManagerDialog(
                     if (idx < 0 || idx >= model.size) return
                     val p: ProxyProfile = model.getElementAt(idx)
 
-                    // hit-test trash icon (right side ~30px from edge)
+                    // hit-test delete cross (right side ~30px from edge)
                     val cellBounds = getCellBounds(idx, idx) ?: return
                     val xInCell = e.x - cellBounds.x
                     if (xInCell > cellBounds.width - 44) {
@@ -156,8 +168,10 @@ class KeyManagerDialog(
             })
         }
         add(JScrollPane(list).apply {
-            border = BorderFactory.createLineBorder(T.BORDER)
-            viewport.background = T.BG_INPUT
+            border = BorderFactory.createEmptyBorder()
+            viewport.background = T.CARD_SOLID
+            isOpaque = false
+            viewport.isOpaque = false
         }, BorderLayout.CENTER)
 
         emptyHint.isVisible = false
@@ -169,7 +183,7 @@ class KeyManagerDialog(
         layout = BoxLayout(this, BoxLayout.X_AXIS)
         border = EmptyBorder(14, 0, 0, 0)
         add(Box.createHorizontalGlue())
-        add(T.accentButton("Готово").apply {
+        add(T.accentButton(L.t("Готово", "Done")).apply {
             preferredSize = Dimension(160, 40)
             maximumSize = Dimension(160, 40)
             addActionListener { dispose() }
@@ -179,7 +193,7 @@ class KeyManagerDialog(
     private fun save() {
         val profile = runCatching { parser.parse(keyInput.text) }
             .getOrElse {
-                JOptionPane.showMessageDialog(this, it.message ?: "ключ не сохранён",
+                JOptionPane.showMessageDialog(this, it.message ?: L.t("ключ не сохранён", "key not saved"),
                     "Beacon", JOptionPane.ERROR_MESSAGE)
                 return
             }
@@ -191,7 +205,7 @@ class KeyManagerDialog(
     }
 
     private fun confirmDelete(p: ProxyProfile) {
-        val res = JOptionPane.showConfirmDialog(this, "Удалить ключ «${p.name}»?",
+        val res = JOptionPane.showConfirmDialog(this, L.t("Удалить ключ «${p.name}»?", "Delete key \"${p.name}\"?"),
             "Beacon", JOptionPane.YES_NO_OPTION)
         if (res != JOptionPane.YES_OPTION) return
         profiles = profiles.filterNot { it.id == p.id }
@@ -224,22 +238,21 @@ class KeyManagerDialog(
     }
 
     /** Single row in the keys list. */
-    private class Row(profile: ProxyProfile, isSelected: Boolean, isActive: Boolean) : JPanel() {
+    private class Row(profile: ProxyProfile, val isSelected: Boolean, val isActive: Boolean) : JPanel() {
         init {
-            isOpaque = true
-            background = if (isSelected) Color(40, 60, 130) else T.BG_INPUT
+            isOpaque = false
             layout = BorderLayout()
-            border = EmptyBorder(8, 14, 8, 14)
+            border = EmptyBorder(10, 18, 10, 18)
 
             val left = JPanel().apply {
                 isOpaque = false
                 layout = BoxLayout(this, BoxLayout.X_AXIS)
                 val dot = JLabel("●").apply {
-                    foreground = if (isActive) T.SUCCESS else T.BORDER
-                    font = font.deriveFont(14f)
+                    foreground = if (isActive) T.SUCCESS else T.MUTED
+                    font = font.deriveFont(13f)
                 }
                 add(dot)
-                add(Box.createHorizontalStrut(12))
+                add(Box.createHorizontalStrut(14))
                 val text = JPanel().apply {
                     isOpaque = false
                     layout = BoxLayout(this, BoxLayout.Y_AXIS)
@@ -263,20 +276,34 @@ class KeyManagerDialog(
                 isOpaque = false
                 layout = BoxLayout(this, BoxLayout.X_AXIS)
                 if (isActive) {
-                    add(JLabel("активный").apply {
+                    add(JLabel(L.t("активный", "active")).apply {
                         foreground = T.SUCCESS
                         font = font.deriveFont(Font.BOLD, 10f)
                         border = EmptyBorder(0, 8, 0, 12)
                     })
                 }
-                add(JLabel("🗑").apply {
-                    foreground = T.MUTED
-                    font = font.deriveFont(15f)
-                    toolTipText = "Удалить ключ"
-                    border = EmptyBorder(0, 6, 0, 6)
+                add(Box.createHorizontalStrut(4))
+                add(JLabel("✕").apply {
+                    foreground = T.DANGER
+                    font = font.deriveFont(Font.BOLD, 14f)
+                    border = EmptyBorder(2, 6, 2, 6)
                 })
             }
             add(right, BorderLayout.EAST)
+        }
+
+        override fun paintComponent(g: Graphics) {
+            val g2 = g as Graphics2D
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+            g2.color = when {
+                isActive -> Color(40, 56, 120, 220)
+                isSelected -> Color(35, 48, 92, 180)
+                else -> T.BG_INPUT
+            }
+            g2.fillRoundRect(4, 4, width - 8, height - 8, 12, 12)
+            g2.color = if (isActive) T.ACCENT_LIGHT else T.BORDER_SOFT
+            g2.stroke = BasicStroke(1f)
+            g2.drawRoundRect(4, 4, width - 9, height - 9, 12, 12)
         }
     }
 }

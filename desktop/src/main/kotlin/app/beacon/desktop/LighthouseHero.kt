@@ -15,6 +15,7 @@ import java.awt.geom.Path2D
 import javax.swing.JPanel
 import javax.swing.Timer
 import kotlin.math.cos
+import kotlin.math.pow
 import kotlin.math.sin
 
 class LighthouseHero : JPanel() {
@@ -26,9 +27,11 @@ class LighthouseHero : JPanel() {
             if (field == value) return
             field = value
             stateChangedAt = System.currentTimeMillis()
+            lastFrameAt = stateChangedAt
         }
 
     private var stateChangedAt = System.currentTimeMillis()
+    private var lastFrameAt = stateChangedAt
 
     private var sweepPhase = 0.0
     private var sweepSpeed = 0.0
@@ -59,28 +62,32 @@ class LighthouseHero : JPanel() {
 
     private val timer: Timer = Timer(16) {
         val now = System.currentTimeMillis()
+        val frameScale = ((now - lastFrameAt).coerceIn(8L, 48L)) / 16.0
+        lastFrameAt = now
         val targetSpeed = when (heroState) {
             HeroState.ON -> 0.012
             HeroState.CONNECTING -> 0.045
             HeroState.OFF -> 0.0
         }
-        sweepSpeed += (targetSpeed - sweepSpeed) * 0.06
-        sweepPhase += sweepSpeed
+        val speedEase = 1.0 - (1.0 - 0.06).pow(frameScale)
+        sweepSpeed += (targetSpeed - sweepSpeed) * speedEase
+        sweepPhase += sweepSpeed * frameScale
 
-        for (i in waveOffsets.indices) waveOffsets[i] += 0.35 + i * 0.12
+        for (i in waveOffsets.indices) waveOffsets[i] += (0.35 + i * 0.12) * frameScale
 
         if (now >= nextShootingAt) {
             shootingStars += ShootingStar.spawn(width, height)
             nextShootingAt = now + (3500 + Math.random() * 7000).toLong()
         }
-        shootingStars.removeAll { it.tick() }
+        shootingStars.removeAll { it.tick(frameScale) }
 
         val fogTarget = when (heroState) {
             HeroState.OFF -> 0f
             HeroState.CONNECTING -> 0.50f
             HeroState.ON -> 1.0f
         }
-        fogAlpha += (fogTarget - fogAlpha) * 0.028f
+        val fogEase = (1.0 - (1.0 - 0.028).pow(frameScale)).toFloat()
+        fogAlpha += (fogTarget - fogAlpha) * fogEase
 
         // Bulb color: slowly drifts to warm yellow and back when ON
         if (heroState == HeroState.ON) {
@@ -88,15 +95,18 @@ class LighthouseHero : JPanel() {
                 bulbColorTarget = if (bulbColorTarget < 0.5f) 0.9f else 0f
                 nextColorShiftAt = now + (4000 + (Math.random() * 9000)).toLong()
             }
-            bulbColorT += (bulbColorTarget - bulbColorT) * 0.006f
+            val bulbEase = (1.0 - (1.0 - 0.006).pow(frameScale)).toFloat()
+            bulbColorT += (bulbColorTarget - bulbColorT) * bulbEase
         } else {
-            bulbColorT += (0f - bulbColorT) * 0.04f
+            val bulbEase = (1.0 - (1.0 - 0.04).pow(frameScale)).toFloat()
+            bulbColorT += (0f - bulbColorT) * bulbEase
         }
 
         // Adaptive frame rate: 60fps when active, ~30fps while fading, ~20fps when idle
+        val largeCanvas = width.toLong() * height.toLong() > 650_000L
         val targetDelay = when {
-            heroState != HeroState.OFF -> 16
-            fogAlpha > 0.01f || shootingStars.isNotEmpty() -> 33
+            heroState != HeroState.OFF -> if (largeCanvas) 18 else 16
+            fogAlpha > 0.01f || shootingStars.isNotEmpty() -> if (largeCanvas) 38 else 33
             else -> 50
         }
         if (timer.delay != targetDelay) timer.delay = targetDelay
@@ -106,9 +116,9 @@ class LighthouseHero : JPanel() {
 
     init {
         isOpaque = false
-        preferredSize = Dimension(420, 260)
-        minimumSize = Dimension(280, 170)
-        maximumSize = Dimension(520, 320)
+        preferredSize = Dimension(700, 400)
+        minimumSize = Dimension(320, 200)
+        maximumSize = Dimension(Int.MAX_VALUE, 500)
         timer.start()
     }
 
@@ -664,107 +674,182 @@ class LighthouseHero : JPanel() {
         )
         g2.draw(foamPath)
 
-        val plinthW = (bottomW * 1.35).toInt()
-        val plinthH = (towerH * 0.07).toInt()
+        val plinthW = (bottomW * 1.48).toInt()
+        val plinthH = (towerH * 0.075).toInt()
         val plinthY = baseY - plinthH
-        g2.color = Color(40, 52, 96)
-        g2.fillRoundRect(baseX - plinthW / 2, plinthY, plinthW, plinthH, 8, 8)
-        g2.color = Color(70, 90, 140, 180)
-        g2.drawRoundRect(baseX - plinthW / 2, plinthY, plinthW - 1, plinthH - 1, 8, 8)
-        val plinth2W = (plinthW * 0.85).toInt()
-        g2.color = Color(48, 62, 108)
-        g2.fillRoundRect(baseX - plinth2W / 2, plinth2Y, plinth2W, plinth2H, 6, 6)
+        g2.paint = GradientPaint(
+            (baseX - plinthW / 2f), plinthY.toFloat(), Color(58, 72, 124),
+            (baseX + plinthW / 2f), baseY.toFloat(), Color(22, 30, 66)
+        )
+        g2.fillRoundRect(baseX - plinthW / 2, plinthY, plinthW, plinthH, 9, 9)
+        g2.color = Color(105, 130, 190, 130)
+        g2.drawRoundRect(baseX - plinthW / 2, plinthY, plinthW - 1, plinthH - 1, 9, 9)
 
-        val ttX = (baseX - topW / 2).toDouble()
+        val plinth2W = (plinthW * 0.82).toInt()
+        g2.paint = GradientPaint(
+            (baseX - plinth2W / 2f), plinth2Y.toFloat(), Color(72, 88, 145),
+            (baseX + plinth2W / 2f), (plinth2Y + plinth2H).toFloat(), Color(36, 48, 96)
+        )
+        g2.fillRoundRect(baseX - plinth2W / 2, plinth2Y, plinth2W, plinth2H, 7, 7)
+
         val ttY = towerTopY.toDouble()
+        fun widthAt(y: Double): Int {
+            val t = ((y - ttY) / (tbY - ttY)).coerceIn(0.0, 1.0).toFloat()
+            return lerpInt(topW, bottomW, t)
+        }
+
         towerPath.reset()
-        towerPath.moveTo(ttX, ttY)
-        towerPath.lineTo((baseX + topW / 2).toDouble(), ttY)
-        towerPath.lineTo((baseX + bottomW / 2).toDouble(), tbY)
-        towerPath.lineTo((baseX - bottomW / 2).toDouble(), tbY)
+        towerPath.moveTo(baseX - topW * 0.56, ttY)
+        towerPath.curveTo(
+            baseX - topW * 0.68, ttY + towerH * 0.16,
+            baseX - bottomW * 0.55, tbY - towerH * 0.10,
+            baseX - bottomW * 0.50, tbY
+        )
+        towerPath.lineTo(baseX + bottomW * 0.50, tbY)
+        towerPath.curveTo(
+            baseX + bottomW * 0.55, tbY - towerH * 0.10,
+            baseX + topW * 0.68, ttY + towerH * 0.16,
+            baseX + topW * 0.56, ttY
+        )
         towerPath.closePath()
         g2.paint = GradientPaint(
-            (baseX - bottomW / 2f), 0f, Color(248, 250, 255),
-            (baseX + bottomW / 2f), 0f, Color(200, 212, 240)
+            (baseX - bottomW / 2f), 0f, Color(254, 255, 255),
+            (baseX + bottomW / 2f), 0f, Color(185, 202, 235)
         )
         g2.fill(towerPath)
-        g2.color = Color(80, 100, 160, 80); g2.stroke = BasicStroke(1f); g2.draw(towerPath)
 
-        val bands = 3
-        for (i in 0 until bands) {
-            val t = (i + 1f) / (bands + 1)
-            val y = (ttY + (tbY - ttY) * t).toInt()
-            val widthAtY = lerpInt(topW, bottomW, t)
-            val pad = 3
-            val l = baseX - widthAtY / 2 + pad
-            val r = baseX + widthAtY / 2 - pad
-            val bh = (towerH * 0.045).toInt()
-            val color = if (i == 1) Color(220, 70, 80) else Color(60, 110, 230)
-            g2.paint = GradientPaint(l.toFloat(), (y - bh / 2).toFloat(), color,
-                l.toFloat(), (y + bh / 2).toFloat(), color.darker())
-            g2.fillRoundRect(l, y - bh / 2, r - l, bh, 5, 5)
-        }
-
-        val doorW = (bottomW * 0.16).toInt()
-        val doorH = (plinth2H * 0.9).toInt()
-        g2.color = Color(28, 38, 80)
-        g2.fillRoundRect(baseX - doorW / 2, plinth2Y - doorH + (plinth2H * 0.4).toInt(), doorW, doorH, 4, 4)
-
-        val galleryW = (topW * 1.7).toInt()
-        val galleryH = (towerH * 0.045).toInt()
-        val galleryY = towerTopY - galleryH
-        g2.color = Color(40, 52, 96)
-        g2.fillRoundRect(baseX - galleryW / 2, galleryY, galleryW, galleryH, 4, 4)
-        g2.color = Color(180, 195, 230)
-        g2.fillRect(baseX - galleryW / 2 + 2, galleryY - 1, galleryW - 4, 2)
-        for (j in 0..4) {
-            val px = baseX - galleryW / 2 + 6 + j * (galleryW - 12) / 4
-            g2.color = Color(60, 80, 130)
-            g2.fillRect(px, galleryY - 4, 1, 4)
-        }
-
-        val lantW   = (topW * 1.45).toInt()
-        val lantH   = (towerH * 0.16).toInt()
-        val lantTopY = galleryY - lantH
-        g2.paint = GradientPaint(
-            (baseX - lantW / 2f), lantTopY.toFloat(), Color(20, 30, 70),
-            (baseX + lantW / 2f), lantTopY.toFloat() + lantH, Color(12, 20, 50)
+        highlightPath.reset()
+        highlightPath.moveTo(baseX - bottomW * 0.50, tbY)
+        highlightPath.curveTo(
+            baseX - bottomW * 0.44, tbY - towerH * 0.18,
+            baseX - topW * 0.42, ttY + towerH * 0.10,
+            baseX - topW * 0.28, ttY
         )
-        g2.fillRoundRect(baseX - lantW / 2, lantTopY, lantW, lantH, 6, 6)
-        g2.color = Color(120, 140, 190, 150)
-        g2.drawRoundRect(baseX - lantW / 2, lantTopY, lantW - 1, lantH - 1, 6, 6)
+        highlightPath.lineTo(baseX - topW * 0.02, ttY)
+        highlightPath.curveTo(
+            baseX - topW * 0.16, ttY + towerH * 0.16,
+            baseX - bottomW * 0.22, tbY - towerH * 0.08,
+            baseX - bottomW * 0.18, tbY
+        )
+        highlightPath.closePath()
+        g2.color = Color(255, 255, 255, 46)
+        g2.fill(highlightPath)
+
+        g2.color = Color(60, 82, 145, 95)
+        g2.stroke = BasicStroke(1.1f)
+        g2.draw(towerPath)
+
+        for (i in 0 until 3) {
+            val t = 0.25 + i * 0.23
+            val yMid = ttY + (tbY - ttY) * t
+            val bh = towerH * 0.046
+            val topBandW = widthAt(yMid - bh / 2.0) - 8
+            val botBandW = widthAt(yMid + bh / 2.0) - 8
+            val slope = towerH * 0.012
+            val color = if (i == 1) Color(210, 62, 76) else Color(54, 106, 224)
+            highlightPath.reset()
+            highlightPath.moveTo(baseX - topBandW / 2.0, yMid - bh / 2.0)
+            highlightPath.lineTo(baseX + topBandW / 2.0, yMid - bh / 2.0 + slope)
+            highlightPath.lineTo(baseX + botBandW / 2.0, yMid + bh / 2.0 + slope)
+            highlightPath.lineTo(baseX - botBandW / 2.0, yMid + bh / 2.0)
+            highlightPath.closePath()
+            g2.paint = GradientPaint(
+                (baseX - botBandW / 2f), (yMid - bh / 2.0).toFloat(), color.brighter(),
+                (baseX + botBandW / 2f), (yMid + bh / 2.0).toFloat(), color.darker()
+            )
+            g2.fill(highlightPath)
+        }
+
+        for (i in 0..1) {
+            val t = if (i == 0) 0.39 else 0.65
+            val y = (ttY + (tbY - ttY) * t).toInt()
+            val winW = (widthAt(y.toDouble()) * 0.15).toInt().coerceAtLeast(5)
+            val winH = (towerH * 0.075).toInt().coerceAtLeast(12)
+            g2.color = Color(24, 35, 78)
+            g2.fillRoundRect(baseX - winW / 2, y - winH / 2, winW, winH, 5, 5)
+            g2.color = Color(145, 185, 245, 85)
+            g2.drawRoundRect(baseX - winW / 2, y - winH / 2, winW, winH, 5, 5)
+        }
+
+        val doorW = (bottomW * 0.18).toInt()
+        val doorH = (plinth2H * 1.05).toInt()
+        val doorY = plinth2Y - doorH + (plinth2H * 0.42).toInt()
+        g2.paint = GradientPaint(
+            (baseX - doorW / 2f), doorY.toFloat(), Color(34, 46, 92),
+            (baseX + doorW / 2f), (doorY + doorH).toFloat(), Color(14, 20, 50)
+        )
+        g2.fillRoundRect(baseX - doorW / 2, doorY, doorW, doorH, 5, 5)
+        g2.color = Color(130, 160, 220, 80)
+        g2.drawRoundRect(baseX - doorW / 2, doorY, doorW, doorH, 5, 5)
+
+        val galleryW = (topW * 1.95).toInt()
+        val galleryH = (towerH * 0.052).toInt()
+        val galleryY = towerTopY - galleryH
+        g2.paint = GradientPaint(
+            (baseX - galleryW / 2f), galleryY.toFloat(), Color(66, 78, 132),
+            (baseX + galleryW / 2f), (galleryY + galleryH).toFloat(), Color(28, 38, 84)
+        )
+        g2.fillRoundRect(baseX - galleryW / 2, galleryY, galleryW, galleryH, 6, 6)
+        g2.color = Color(200, 215, 245)
+        g2.fillRoundRect(baseX - galleryW / 2 + 3, galleryY - 2, galleryW - 6, 3, 3, 3)
+        for (j in 0..6) {
+            val px = baseX - galleryW / 2 + 7 + j * (galleryW - 14) / 6
+            g2.color = Color(88, 110, 168)
+            g2.fillRoundRect(px, galleryY - 7, 2, 8, 2, 2)
+        }
+
+        val lantW = (topW * 1.65).toInt()
+        val lantH = (towerH * 0.17).toInt()
+        val lantTopY = galleryY - lantH
+        val glassPad = 4
+        g2.paint = GradientPaint(
+            (baseX - lantW / 2f), lantTopY.toFloat(), Color(24, 36, 82),
+            (baseX + lantW / 2f), (lantTopY + lantH).toFloat(), Color(10, 17, 46)
+        )
+        g2.fillRoundRect(baseX - lantW / 2, lantTopY, lantW, lantH, 8, 8)
+        g2.paint = GradientPaint(
+            (baseX - lantW / 2f), (lantTopY + glassPad).toFloat(), Color(80, 135, 205, 125),
+            (baseX + lantW / 2f), (lantTopY + lantH - glassPad).toFloat(), Color(18, 30, 70, 160)
+        )
+        g2.fillRoundRect(baseX - lantW / 2 + glassPad, lantTopY + glassPad, lantW - glassPad * 2, lantH - glassPad * 2, 6, 6)
+        g2.color = Color(145, 170, 220, 165)
+        g2.drawRoundRect(baseX - lantW / 2, lantTopY, lantW - 1, lantH - 1, 8, 8)
         for (k in 1 until 4) {
             val x = baseX - lantW / 2 + (lantW * k / 4)
-            g2.color = Color(90, 110, 170, 110)
-            g2.drawLine(x, lantTopY + 2, x, lantTopY + lantH - 2)
+            g2.color = Color(190, 210, 245, 115)
+            g2.drawLine(x, lantTopY + 4, x, lantTopY + lantH - 4)
         }
 
-        val roofW  = (lantW * 1.18).toInt()
-        val roofH  = (lantH * 1.05).toInt()
-        val apexX  = baseX.toDouble(); val apexY = (lantTopY - roofH).toDouble()
-        val eaveL  = baseX - roofW / 2.0 - 2.0; val eaveR = baseX + roofW / 2.0 + 2.0
-        val eaveY  = lantTopY + 2.0
+        val roofW = (lantW * 1.30).toInt()
+        val roofH = (lantH * 0.88).toInt()
+        val apexX = baseX.toDouble()
+        val apexY = (lantTopY - roofH).toDouble()
+        val eaveL = baseX - roofW / 2.0 - 2.0
+        val eaveR = baseX + roofW / 2.0 + 2.0
+        val eaveY = lantTopY + 2.0
         roofPath.reset()
         roofPath.moveTo(apexX, apexY)
-        roofPath.lineTo(eaveL, eaveY)
-        roofPath.quadTo(baseX.toDouble(), eaveY + 3.0, eaveR, eaveY)
+        roofPath.curveTo(baseX - roofW * 0.18, apexY + roofH * 0.34, eaveL, eaveY - 2.0, eaveL, eaveY)
+        roofPath.quadTo(baseX.toDouble(), eaveY + 4.0, eaveR, eaveY)
+        roofPath.curveTo(eaveR, eaveY - 2.0, baseX + roofW * 0.18, apexY + roofH * 0.34, apexX, apexY)
         roofPath.closePath()
-        g2.paint = GradientPaint((baseX - roofW / 2f), lantTopY.toFloat(), Color(190, 50, 60),
-            (baseX + roofW / 2f), lantTopY.toFloat(), Color(140, 30, 40))
+        g2.paint = GradientPaint(
+            (baseX - roofW / 2f), apexY.toFloat(), Color(218, 58, 70),
+            (baseX + roofW / 2f), eaveY.toFloat(), Color(125, 26, 42)
+        )
         g2.fill(roofPath)
-        g2.color = Color(255, 255, 255, 40)
+        g2.color = Color(255, 255, 255, 50)
         highlightPath.reset()
-        highlightPath.moveTo((baseX - roofW * 0.35), (lantTopY - 2).toDouble())
-        highlightPath.quadTo((baseX - roofW * 0.18), (lantTopY - roofH * 0.7).toDouble(),
-            (baseX - 1).toDouble(), (lantTopY - roofH + 4).toDouble())
-        g2.stroke = BasicStroke(2.5f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)
+        highlightPath.moveTo(baseX - roofW * 0.34, lantTopY - 2.0)
+        highlightPath.quadTo(baseX - roofW * 0.13, lantTopY - roofH * 0.62, baseX - 1.0, apexY + 5.0)
+        g2.stroke = BasicStroke(2.4f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)
         g2.draw(highlightPath)
 
         val ballR = (towerH * 0.018).toInt().coerceAtLeast(3)
-        val ballY = lantTopY - roofH - ballR * 2 - 2
-        g2.color = Color(240, 245, 255)
+        val ballY = lantTopY - roofH - ballR * 2 - 3
+        g2.color = Color(242, 246, 255)
         g2.fillOval(baseX - ballR, ballY, ballR * 2, ballR * 2)
-        g2.color = Color(180, 195, 230)
+        g2.color = Color(175, 195, 230)
         g2.stroke = BasicStroke(1.2f)
         g2.drawLine(baseX, ballY + ballR * 2, baseX, lantTopY - roofH)
     }
@@ -979,13 +1064,18 @@ class LighthouseHero : JPanel() {
     private class ShootingStar(
         var x: Double, var y: Double,
         val dx: Double, val dy: Double,
-        var life: Int,
+        var life: Double,
         val maxLife: Int
     ) {
         val tailDx: Double get() = dx * 20
         val tailDy: Double get() = dy * 20
 
-        fun tick(): Boolean { x += dx; y += dy; life++; return life >= maxLife }
+        fun tick(frameScale: Double): Boolean {
+            x += dx * frameScale
+            y += dy * frameScale
+            life += frameScale
+            return life >= maxLife
+        }
 
         fun alpha(): Double {
             val t = life.toDouble() / maxLife
@@ -1005,7 +1095,7 @@ class LighthouseHero : JPanel() {
                 val speed  = 5.5 + r.nextDouble() * 4.5
                 val dx = cos(angle) * speed * if (goingRight) 1.0 else -1.0
                 val dy = sin(angle) * speed
-                return ShootingStar(x = startX, y = startY, dx = dx, dy = dy, life = 0, maxLife = 38 + r.nextInt(22))
+                return ShootingStar(x = startX, y = startY, dx = dx, dy = dy, life = 0.0, maxLife = 38 + r.nextInt(22))
             }
         }
     }

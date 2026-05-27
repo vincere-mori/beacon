@@ -74,6 +74,13 @@ class SingBoxConfigBuilder(
                     }
                     put("detour", "proxy")
                 })
+                // Direct DNS for Russian domains — Yandex DNS, bypasses VPN
+                // so Russian CDNs return local IPs instead of foreign ones.
+                add(buildJsonObject {
+                    put("type", "udp")
+                    put("tag", "ru-direct")
+                    put("server", "77.88.8.8")
+                })
                 // Note: we intentionally do NOT add a warp-dns server here.
                 // WireGuard endpoints are L3 tunnels and cannot be used as DNS detour
                 // (which requires an L4 connection). Google domains are resolved via
@@ -87,6 +94,13 @@ class SingBoxConfigBuilder(
                         put("server", "bootstrap")
                     })
                 }
+                // Russian domains → resolve via direct Yandex DNS
+                add(buildJsonObject {
+                    put("domain_suffix", buildJsonArray {
+                        ruBypassDomains().forEach { add(JsonPrimitive(it)) }
+                    })
+                    put("server", "ru-direct")
+                })
             })
             put("final", "remote")
         }
@@ -102,6 +116,32 @@ class SingBoxConfigBuilder(
         // when WARP is enabled.
         "discord.com", "discord.gg", "discord.media",
         "discordapp.com", "discordapp.net"
+    )
+
+    /**
+     * Russian domains that should bypass the VPN and connect directly.
+     * Russian websites commonly block foreign IPs, so routing them through
+     * a VPN server abroad causes access issues. These domains are resolved
+     * via direct DNS (Yandex 77.88.8.8) and routed to the "direct" outbound.
+     */
+    private fun ruBypassDomains() = listOf(
+        // ── Top-level Russian domains ─────────────────────────────────────
+        "ru",                           // .ru — covers yandex.ru, mail.ru, sber.ru, etc.
+        "xn--p1ai",                     // .рф (punycode) — госуслуги.рф, etc.
+        "su",                           // .su — legacy Soviet TLD, still active
+        // ── Popular Russian services on non-.ru TLDs ─────────────────────
+        // VK ecosystem
+        "vk.com", "vk.me", "vk.cc",
+        "vkuserid.com", "vkuservideo.net",
+        // Mail.ru / VK CDN
+        "mycdn.me",
+        // Streaming
+        "okko.tv", "more.tv",
+        // Media
+        "rt.com",
+        // Yandex international domains
+        "yandex.com", "yandex.net", "yandex.by", "yandex.kz",
+        "ya.ru"
     )
 
     private fun tun(settings: SingBoxConfigSettings): JsonObject {
@@ -233,6 +273,16 @@ class SingBoxConfigBuilder(
                 add(buildJsonObject { put("action", "sniff") })
                 add(buildJsonObject { put("protocol", "dns"); put("action", "hijack-dns") })
                 add(buildJsonObject { put("ip_is_private", true); put("action", "route"); put("outbound", "direct") })
+                // Russian domains → bypass VPN, go direct.
+                // Russian sites block foreign IPs; routing them through the
+                // proxy server abroad breaks access.
+                add(buildJsonObject {
+                    put("domain_suffix", buildJsonArray {
+                        ruBypassDomains().forEach { add(JsonPrimitive(it)) }
+                    })
+                    put("action", "route")
+                    put("outbound", "direct")
+                })
                 if (settings.warpEnabled && settings.warpPrivateKey.isNotBlank()) {
                     add(buildJsonObject {
                         put("domain_suffix", buildJsonArray {

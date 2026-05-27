@@ -43,7 +43,7 @@ class SubscriptionDialog(
     private var subscriptions: List<Subscription>,
     private var activeId: String?,
     private val onChange: (List<Subscription>, String?) -> Unit
-) : JDialog(owner, "Подписки", true) {
+) : JDialog(owner, L.t("Подписки", "Subscriptions"), true) {
 
     private val fetcher = SubscriptionFetcher()
     private val subParser = SubscriptionParser()
@@ -60,8 +60,12 @@ class SubscriptionDialog(
         layout = BoxLayout(this, BoxLayout.Y_AXIS)
     }
     private val emptyHint = JLabel(
-        "<html><div style='text-align:center;color:#7B8EAD'>" +
-        "Пока нет подписок.<br>Вставь ссылку подписки (http/https) выше и нажми «Добавить».</div></html>",
+        L.t(
+            "<html><div style='text-align:center;color:#7B8EAD'>" +
+            "Пока нет подписок.<br>Вставь ссылку подписки (http/https) выше и нажми «Добавить».</div></html>",
+            "<html><div style='text-align:center;color:#7B8EAD'>" +
+            "No subscriptions yet.<br>Paste a subscription link (http/https) above and click \"Add\".</div></html>"
+        ),
         SwingConstants.CENTER
     )
     private var busy = false
@@ -93,11 +97,11 @@ class SubscriptionDialog(
     private fun header(): JPanel = JPanel().apply {
         isOpaque = false
         layout = BoxLayout(this, BoxLayout.Y_AXIS)
-        add(JLabel("Подписки").apply {
+        add(JLabel(L.t("Подписки", "Subscriptions")).apply {
             foreground = T.TEXT; font = font.deriveFont(Font.BOLD, 22f); alignmentX = 0f
         })
         add(Box.createVerticalStrut(4))
-        add(JLabel("ссылка подписки разворачивается в список серверов — выбери нужный").apply {
+        add(JLabel(L.t("ссылка подписки разворачивается в список серверов — выбери нужный", "subscription link expands to server list — select the desired one")).apply {
             foreground = T.MUTED; font = font.deriveFont(Font.PLAIN, 12f); alignmentX = 0f
         })
         add(Box.createVerticalStrut(16))
@@ -108,7 +112,6 @@ class SubscriptionDialog(
         add(inputCard(), BorderLayout.NORTH)
         add(listCard(), BorderLayout.CENTER)
     }
-
     private fun inputCard(): JPanel = T.card().apply {
         layout = BorderLayout(10, 0)
         maximumSize = Dimension(Int.MAX_VALUE, 70)
@@ -118,10 +121,22 @@ class SubscriptionDialog(
             border = BorderFactory.createCompoundBorder(
                 BorderFactory.createLineBorder(T.BORDER), EmptyBorder(8, 10, 8, 10)
             )
+            addFocusListener(object : java.awt.event.FocusListener {
+                override fun focusGained(e: java.awt.event.FocusEvent) {
+                    border = BorderFactory.createCompoundBorder(
+                        BorderFactory.createLineBorder(T.ACCENT), EmptyBorder(8, 10, 8, 10)
+                    )
+                }
+                override fun focusLost(e: java.awt.event.FocusEvent) {
+                    border = BorderFactory.createCompoundBorder(
+                        BorderFactory.createLineBorder(T.BORDER), EmptyBorder(8, 10, 8, 10)
+                    )
+                }
+            })
             addActionListener { addSubscription() }
         }
         add(urlInput, BorderLayout.CENTER)
-        add(T.accentButton("Добавить").apply {
+        add(T.accentButton(L.t("Добавить", "Add")).apply {
             preferredSize = Dimension(130, 38)
             addActionListener { addSubscription() }
         }, BorderLayout.EAST)
@@ -148,7 +163,7 @@ class SubscriptionDialog(
         layout = BoxLayout(this, BoxLayout.X_AXIS)
         border = EmptyBorder(14, 0, 0, 0)
         add(Box.createHorizontalGlue())
-        add(T.accentButton("Готово").apply {
+        add(T.accentButton(L.t("Готово", "Done")).apply {
             preferredSize = Dimension(160, 40)
             addActionListener { dispose() }
         })
@@ -160,14 +175,14 @@ class SubscriptionDialog(
         val url = urlInput.text.trim()
         if (url.isBlank() || busy) return
         if (!url.startsWith("http://", true) && !url.startsWith("https://", true)) {
-            error("ссылка подписки должна начинаться с http:// или https://")
+            error(L.t("ссылка подписки должна начинаться с http:// или https://", "subscription link must start with http:// or https://"))
             return
         }
         setBusy(true)
         Thread {
             val result = runCatching {
                 val servers = subParser.parse(fetcher.fetch(url))
-                if (servers.isEmpty()) throw IllegalStateException("в подписке нет VLESS Reality серверов")
+                if (servers.isEmpty()) throw IllegalStateException(L.t("в подписке нет VLESS Reality серверов", "no VLESS Reality servers found in subscription"))
                 servers
             }
             SwingUtilities.invokeLater {
@@ -185,7 +200,7 @@ class SubscriptionDialog(
                         urlInput.text = ""
                         commit()
                     },
-                    onFailure = { error("не удалось загрузить подписку: ${it.message ?: "ошибка"}") }
+                    onFailure = { error(L.t("не удалось загрузить подписку: ", "failed to load subscription: ") + (it.message ?: L.t("ошибка", "error"))) }
                 )
             }
         }.apply { isDaemon = true; start() }
@@ -197,7 +212,7 @@ class SubscriptionDialog(
         Thread {
             val result = runCatching {
                 val servers = subParser.parse(fetcher.fetch(sub.url))
-                if (servers.isEmpty()) throw IllegalStateException("в подписке нет серверов")
+                if (servers.isEmpty()) throw IllegalStateException(L.t("в подписке нет серверов", "no servers in subscription"))
                 servers
             }
             SwingUtilities.invokeLater {
@@ -211,14 +226,14 @@ class SubscriptionDialog(
                         }
                         commit()
                     },
-                    onFailure = { error("не удалось обновить подписку: ${it.message ?: "ошибка"}") }
+                    onFailure = { error(L.t("не удалось обновить подписку: ", "failed to update subscription: ") + (it.message ?: L.t("ошибка", "error"))) }
                 )
             }
         }.apply { isDaemon = true; start() }
     }
 
     private fun deleteSubscription(sub: Subscription) {
-        val res = JOptionPane.showConfirmDialog(this, "Удалить подписку «${sub.name}»?",
+        val res = JOptionPane.showConfirmDialog(this, L.t("Удалить подписку «${sub.name}»?", "Delete subscription \"${sub.name}\"?"),
             "Beacon", JOptionPane.YES_NO_OPTION)
         if (res != JOptionPane.YES_OPTION) return
         subscriptions = subscriptions.filterNot { it.id == sub.id }
@@ -249,7 +264,7 @@ class SubscriptionDialog(
             .mapNotNull { p -> pingResults[p.id]?.let { p to it } }
             .minByOrNull { it.second }
         if (best == null) {
-            error("сначала измерь пинг серверов («Пинг всех»)")
+            error(L.t("сначала измерь пинг серверов («Пинг всех»)", "measure server pings first (\"Ping all\")"))
             return
         }
         activeId = best.first.id
@@ -277,7 +292,7 @@ class SubscriptionDialog(
 
     private fun subscriptionName(url: String): String {
         val host = runCatching { URI(url).host }.getOrNull()?.takeIf { it.isNotBlank() }
-        return host ?: "Подписка ${subscriptions.size + 1}"
+        return host ?: (L.t("Подписка ", "Subscription ") + (subscriptions.size + 1))
     }
 
     // ── rendering ────────────────────────────────────────────────────────────
@@ -317,7 +332,7 @@ class SubscriptionDialog(
         card.add(subscriptionHeader(sub))
         card.add(Box.createVerticalStrut(10))
         if (sub.profiles.isEmpty()) {
-            card.add(JLabel("серверов нет — попробуй «Обновить»").apply {
+            card.add(JLabel(L.t("серверов нет — попробуй «Обновить»", "no servers — try \"Refresh\"")).apply {
                 foreground = T.MUTED; font = font.deriveFont(Font.PLAIN, 11f); alignmentX = 0f
             })
         } else {
@@ -345,19 +360,20 @@ class SubscriptionDialog(
                 foreground = T.TEXT; font = font.deriveFont(Font.BOLD, 14f); alignmentX = 0f
             })
             add(Box.createVerticalStrut(2))
-            add(JLabel("${sub.profiles.size} серверов").apply {
+            add(JLabel(L.t("${sub.profiles.size} серверов", "${sub.profiles.size} servers")).apply {
                 foreground = T.MUTED; font = font.deriveFont(Font.PLAIN, 11f); alignmentX = 0f
             })
         }
+        title.alignmentX = Component.LEFT_ALIGNMENT
         add(title)
         add(Box.createHorizontalGlue())
-        add(smallButton("Пинг всех") { pingAll(sub) })
+        add(smallButton(L.t("Пинг всех", "Ping all")) { pingAll(sub) })
         add(Box.createHorizontalStrut(6))
-        add(smallButton("Лучший") { pickBest(sub) })
+        add(smallButton(L.t("Лучший", "Best")) { pickBest(sub) })
         add(Box.createHorizontalStrut(6))
-        add(smallButton("Обновить") { refreshSubscription(sub) })
+        add(smallButton(L.t("Обновить", "Refresh")) { refreshSubscription(sub) })
         add(Box.createHorizontalStrut(6))
-        add(smallButton("Удалить") { deleteSubscription(sub) })
+        add(smallButton(L.t("Удалить", "Delete")) { deleteSubscription(sub) })
     }
 
     private fun smallButton(text: String, onClick: () -> Unit): JComponent =
@@ -374,13 +390,33 @@ class SubscriptionDialog(
     private fun serverRow(p: ProxyProfile): JPanel {
         val active = p.id == activeId
         val row = object : JPanel(BorderLayout(10, 0)) {
+            var hoverProgress = 0f
+            val animator = HoverAnimator(this) { hoverProgress = it }
             override fun paintComponent(g: Graphics) {
                 val g2 = g as Graphics2D
                 g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
-                g2.color = if (active) Color(40, 60, 130) else T.BG_INPUT
+
+                // Background color interpolation
+                val bgStart = if (active) Color(40, 60, 130) else T.BG_INPUT
+                val bgEnd = if (active) Color(40, 60, 130) else T.BG_INPUT_HOVER
+                val r = bgStart.red + ((bgEnd.red - bgStart.red) * hoverProgress).toInt()
+                val gDec = bgStart.green + ((bgEnd.green - bgStart.green) * hoverProgress).toInt()
+                val b = bgStart.blue + ((bgEnd.blue - bgStart.blue) * hoverProgress).toInt()
+                g2.color = Color(r, gDec, b)
                 g2.fillRoundRect(0, 0, width, height, 8, 8)
+
                 if (active) {
                     g2.color = T.ACCENT_LIGHT
+                    g2.stroke = BasicStroke(1f)
+                    g2.drawRoundRect(0, 0, width - 1, height - 1, 8, 8)
+                } else if (hoverProgress > 0f) {
+                    val borderStart = Color(T.BORDER_SOFT.red, T.BORDER_SOFT.green, T.BORDER_SOFT.blue, 0)
+                    val borderEnd = T.BORDER_SOFT
+                    val br = borderStart.red + ((borderEnd.red - borderStart.red) * hoverProgress).toInt()
+                    val bgBorder = borderStart.green + ((borderEnd.green - borderStart.green) * hoverProgress).toInt()
+                    val bb = borderStart.blue + ((borderEnd.blue - borderStart.blue) * hoverProgress).toInt()
+                    val alpha = (borderEnd.alpha * hoverProgress).toInt().coerceIn(0, 255)
+                    g2.color = Color(br, bgBorder, bb, alpha)
                     g2.stroke = BasicStroke(1f)
                     g2.drawRoundRect(0, 0, width - 1, height - 1, 8, 8)
                 }
@@ -418,6 +454,8 @@ class SubscriptionDialog(
 
         row.addMouseListener(object : MouseAdapter() {
             override fun mouseClicked(e: MouseEvent) { selectServer(p) }
+            override fun mouseEntered(e: MouseEvent) { row.animator.setTarget(1f) }
+            override fun mouseExited(e: MouseEvent) { row.animator.setTarget(0f) }
         })
         return row
     }
@@ -437,12 +475,12 @@ class SubscriptionDialog(
                     else -> T.DANGER
                 }
             }
-            else -> { text = "пинг"; color = T.MUTED }
+            else -> { text = L.t("пинг", "ping"); color = T.MUTED }
         }
         return JLabel(text).apply {
             foreground = color
             font = font.deriveFont(Font.BOLD, 11f)
-            toolTipText = "Нажми, чтобы измерить задержку"
+            toolTipText = L.t("Нажми, чтобы измерить задержку", "Click to measure latency")
             cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
             border = EmptyBorder(0, 8, 0, 4)
             addMouseListener(object : MouseAdapter() {
