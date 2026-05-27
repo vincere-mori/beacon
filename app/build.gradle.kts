@@ -60,7 +60,7 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.9.2")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.9.2")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.8.1")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")
 
     implementation("net.clever-vpn:libbox-android:2.1.0")
 

@@ -29,7 +29,7 @@ tasks.named<JavaExec>("run") {
 
 dependencies {
     implementation(project(":core"))
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.8.1")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")
     implementation("net.java.dev.jna:jna-platform:5.18.1")
     implementation("com.formdev:flatlaf:3.6")
 
