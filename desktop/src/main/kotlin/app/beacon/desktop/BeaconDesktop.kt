@@ -19,8 +19,14 @@ import java.awt.Font
 import java.awt.GradientPaint
 import java.awt.Graphics
 import java.awt.Graphics2D
+import java.awt.GraphicsEnvironment
+import java.awt.Image
+import java.awt.MenuItem
+import java.awt.PopupMenu
 import java.awt.GridLayout
 import java.awt.RenderingHints
+import java.awt.SystemTray
+import java.awt.TrayIcon
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import java.awt.event.WindowAdapter
@@ -141,9 +147,13 @@ class BeaconDesktop(
     private var connected = false
     private var connecting = false
     private var refreshing = false
+    private var registeringWarp = false
 
     private lateinit var frame: JFrame
+    private val appIcon = ImageIcon(BeaconDesktop::class.java.getResource("/icon.png")).image
     private val hero = LighthouseHero()
+    private var trayIcon: TrayIcon? = null
+    private var trayToggleItem: MenuItem? = null
 
     private val statusDot = JLabel("●")
     private val statusText = JLabel("Отключено")
@@ -176,19 +186,27 @@ class BeaconDesktop(
     private var pinging = false
 
     fun show() {
+        val windowSize = initialWindowSize()
         frame = JFrame("Beacon").apply {
             defaultCloseOperation = JFrame.DO_NOTHING_ON_CLOSE
-            minimumSize = Dimension(880, 720)
-            preferredSize = Dimension(960, 760)
-            iconImage = ImageIcon(BeaconDesktop::class.java.getResource("/icon.png")).image
+            minimumSize = Dimension(
+                minOf(740, windowSize.width),
+                minOf(540, windowSize.height)
+            )
+            preferredSize = windowSize
+            iconImage = appIcon
             // Theme the titlebar via FlatLaf client properties (3.x)
             rootPane.putClientProperty("JRootPane.titleBarBackground", Color(15, 21, 53))
             rootPane.putClientProperty("JRootPane.titleBarForeground", Color(220, 230, 250))
             rootPane.putClientProperty("JRootPane.titleBarBorderColor", Color(28, 38, 80))
             contentPane = buildRoot()
             addWindowListener(object : WindowAdapter() {
-                override fun windowClosing(e: WindowEvent) = shutdown()
-                override fun windowIconified(e: WindowEvent) = hero.pauseAnimation()
+                override fun windowClosing(e: WindowEvent) {
+                    if (!hideToTray()) shutdown()
+                }
+                override fun windowIconified(e: WindowEvent) {
+                    if (!hideToTray()) hero.pauseAnimation()
+                }
                 override fun windowDeiconified(e: WindowEvent) = hero.resumeAnimation()
             })
             pack()
@@ -196,7 +214,17 @@ class BeaconDesktop(
         }
         refresh()
         frame.isVisible = true
+        syncTrayIcon()
         pingTimer.initialDelay = 1000
+    }
+
+    private fun initialWindowSize(): Dimension {
+        val bounds = GraphicsEnvironment.getLocalGraphicsEnvironment().maximumWindowBounds
+        val maxW = (bounds.width - 32).coerceAtLeast(640)
+        val maxH = (bounds.height - 32).coerceAtLeast(520)
+        val width = 960.coerceAtMost(maxW).coerceAtLeast(720.coerceAtMost(maxW))
+        val height = 720.coerceAtMost(maxH).coerceAtLeast(540.coerceAtMost(maxH))
+        return Dimension(width, height)
     }
 
     private fun buildRoot(): JPanel {
@@ -210,13 +238,14 @@ class BeaconDesktop(
             isOpaque = true
             add(topBar(), BorderLayout.NORTH)
             add(centerStack(), BorderLayout.CENTER)
-            add(bottomBar(), BorderLayout.SOUTH)
         }
     }
 
     private fun topBar(): JPanel = JPanel(BorderLayout()).apply {
         isOpaque = false
-        border = EmptyBorder(10, 18, 4, 14)
+        border = EmptyBorder(8, 18, 4, 14)
+
+        add(modeControls(), BorderLayout.WEST)
 
         val right = JPanel().apply {
             isOpaque = false
@@ -239,18 +268,18 @@ class BeaconDesktop(
     private fun centerStack(): JPanel = JPanel().apply {
         isOpaque = false
         layout = BoxLayout(this, BoxLayout.Y_AXIS)
-        border = EmptyBorder(0, 22, 0, 22)
+        border = EmptyBorder(0, 18, 0, 18)
 
-        add(Box.createVerticalStrut(4))
+        add(Box.createVerticalStrut(2))
 
         hero.alignmentX = Component.CENTER_ALIGNMENT
         add(hero)
 
-        add(Box.createVerticalStrut(8))
+        add(Box.createVerticalStrut(6))
         add(statusRow())
-        add(Box.createVerticalStrut(14))
+        add(Box.createVerticalStrut(10))
         add(mainBtn.also { it.alignmentX = Component.CENTER_ALIGNMENT })
-        add(Box.createVerticalStrut(18))
+        add(Box.createVerticalStrut(14))
         add(statsRow())
         add(Box.createVerticalGlue())
     }
@@ -284,8 +313,8 @@ class BeaconDesktop(
         isOpaque = false
         layout = GridLayout(1, 3, 14, 0)
         alignmentX = Component.CENTER_ALIGNMENT
-        maximumSize = Dimension(720, 108)
-        preferredSize = Dimension(720, 108)
+        maximumSize = Dimension(680, 96)
+        preferredSize = Dimension(680, 96)
 
         add(statCard(pingValue, pingLabel, T.ACCENT_LIGHT,
             "<html>Задержка до сервера в миллисекундах.<br>Чем меньше — тем отзывчивее соединение.</html>",
@@ -323,9 +352,8 @@ class BeaconDesktop(
         add(Box.createVerticalGlue())
     }
 
-    private fun bottomBar(): JPanel = JPanel().apply {
+    private fun modeControls(): JPanel = JPanel().apply {
         isOpaque = false
-        border = EmptyBorder(8, 22, 18, 22)
         layout = BoxLayout(this, BoxLayout.X_AXIS)
 
         val seg = ModeSegment(proxyModeBtn, tunModeBtn) { mode ->
@@ -350,11 +378,9 @@ class BeaconDesktop(
             handleWarpClick()
         }
 
-        add(Box.createHorizontalGlue())
         add(seg)
-        add(Box.createHorizontalStrut(12))
+        add(Box.createHorizontalStrut(10))
         add(warpModeBtn)
-        add(Box.createHorizontalGlue())
     }
 
     private fun primaryConnectButton(): JButton {
@@ -367,9 +393,9 @@ class BeaconDesktop(
                 font = font.deriveFont(Font.BOLD, 16f)
                 foreground = Color.WHITE
                 cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
-                preferredSize = Dimension(320, 58)
-                maximumSize = Dimension(320, 58)
-                minimumSize = Dimension(320, 58)
+                preferredSize = Dimension(300, 54)
+                maximumSize = Dimension(300, 54)
+                minimumSize = Dimension(300, 54)
                 addActionListener { toggleConnect() }
                 addMouseListener(object : MouseAdapter() {
                     override fun mouseEntered(e: MouseEvent) { hover = true; repaint() }
@@ -469,48 +495,55 @@ class BeaconDesktop(
         warpModeBtn.isBorderPainted = false
         warpModeBtn.isFocusPainted = false
         warpModeBtn.border = EmptyBorder(0, 14, 0, 14)
-        warpModeBtn.preferredSize = Dimension(112, 42)
-        warpModeBtn.maximumSize = Dimension(112, 42)
-        warpModeBtn.minimumSize = Dimension(112, 42)
+        warpModeBtn.preferredSize = Dimension(104, 40)
+        warpModeBtn.maximumSize = Dimension(104, 40)
+        warpModeBtn.minimumSize = Dimension(104, 40)
         warpModeBtn.font = warpModeBtn.font.deriveFont(Font.BOLD, 13f)
         warpModeBtn.cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
     }
 
     private fun handleWarpClick() {
-        if (!hasUsableWarpCredentials() && warpModeBtn.isSelected) {
-            registerWarp()
+        val enabled = warpModeBtn.isSelected
+        val wasConnected = connected
+        state = state.copy(warpEnabled = enabled)
+        persist()
+        refresh()
+
+        if (enabled && !hasUsableWarpCredentials()) {
+            registerWarp(reconnectOnSuccess = wasConnected)
             return
         }
 
-        val wasConnected = connected
-        state = state.copy(warpEnabled = warpModeBtn.isSelected)
-        persist()
-        refresh()
         if (wasConnected) reconnectAfterModeChange()
     }
 
-    private fun registerWarp() {
-        warpModeBtn.isEnabled = false
-        warpModeBtn.text = "..."
+    private fun registerWarp(afterSuccess: (() -> Unit)? = null, reconnectOnSuccess: Boolean = true) {
+        if (registeringWarp) return
+        registeringWarp = true
+        refresh()
         Thread {
             val result = runCatching { WarpManager.register() }
             SwingUtilities.invokeLater {
+                var successCallback: (() -> Unit)? = null
                 result.fold(
                     onSuccess = { creds ->
                         val wasConnected = connected
                         state = state.copy(warpCredentials = creds, warpEnabled = true)
                         persist()
+                        registeringWarp = false
                         refresh()
-                        if (wasConnected) reconnectAfterModeChange()
+                        if (wasConnected && reconnectOnSuccess) reconnectAfterModeChange()
+                        successCallback = afterSuccess
                     },
                     onFailure = { err ->
                         state = state.copy(warpEnabled = false)
                         persist()
+                        registeringWarp = false
                         refresh()
                         showError("WARP не зарегистрировался: ${err.message ?: "ошибка"}")
                     }
                 )
-                warpModeBtn.isEnabled = true
+                successCallback?.invoke()
             }
         }.apply { isDaemon = true; start() }
     }
@@ -533,9 +566,9 @@ class BeaconDesktop(
         content.add(Box.createVerticalStrut(14))
 
         val card = T.card().apply {
-            layout = GridLayout(2, 2, 16, 12)
+            layout = GridLayout(3, 2, 16, 12)
             alignmentX = 0f
-            maximumSize = Dimension(Int.MAX_VALUE, 110)
+            maximumSize = Dimension(Int.MAX_VALUE, 150)
         }
         card.add(JLabel("DNS").apply {
             foreground = T.MUTED; font = font.deriveFont(Font.PLAIN, 12f)
@@ -560,6 +593,26 @@ class BeaconDesktop(
             }
         }
         card.add(ipv6Box)
+        card.add(JLabel("Трей").apply {
+            foreground = T.MUTED; font = font.deriveFont(Font.PLAIN, 12f)
+            toolTipText = "При закрытии прятать окно в трей, VPN продолжит работать."
+        })
+        val trayBox = JCheckBox().apply {
+            isOpaque = false
+            isSelected = state.trayEnabled
+            isEnabled = isTraySupported()
+            toolTipText = if (isEnabled) {
+                "При закрытии окно скроется, а анимация остановится."
+            } else {
+                "Системный трей недоступен."
+            }
+            addActionListener {
+                state = state.copy(trayEnabled = isSelected)
+                persist()
+                syncTrayIcon()
+            }
+        }
+        card.add(trayBox)
         content.add(card)
 
         content.add(Box.createVerticalStrut(14))
@@ -656,7 +709,7 @@ class BeaconDesktop(
 
         val warp = state.warpCredentials
         if (state.warpEnabled && !hasUsableWarpCredentials()) {
-            showError("WARP нужно зарегистрировать заново")
+            registerWarp(afterSuccess = { connect() }, reconnectOnSuccess = false)
             return
         }
 
@@ -764,6 +817,7 @@ class BeaconDesktop(
 
     private fun shutdown() {
         stopMonitoring()
+        removeTrayIcon()
         runCatching { singBox.stop(); systemProxy.restore() }
         frame.dispose(); exitProcess(0)
     }
@@ -774,6 +828,12 @@ class BeaconDesktop(
         refreshing = true
         try {
             when {
+                registeringWarp -> {
+                    hero.heroState = LighthouseHero.HeroState.CONNECTING
+                    statusDot.foreground = T.WARN; statusText.foreground = T.WARN
+                    statusText.text = "Регистрация WARP…"
+                    mainBtn.text = "Подождите"
+                }
                 connecting -> {
                     hero.heroState = LighthouseHero.HeroState.CONNECTING
                     statusDot.foreground = T.WARN; statusText.foreground = T.WARN
@@ -793,6 +853,7 @@ class BeaconDesktop(
                     mainBtn.text = "Подключить"
                 }
             }
+            mainBtn.isEnabled = !registeringWarp
             mainBtn.repaint()
 
             val active = state.activeProfile
@@ -805,8 +866,9 @@ class BeaconDesktop(
                 InboundMode.Tun -> tunModeBtn.isSelected = true
             }
             proxyModeBtn.repaint(); tunModeBtn.repaint()
-            warpModeBtn.isSelected = state.warpEnabled && hasUsableWarpCredentials()
-            warpModeBtn.text = if (hasUsableWarpCredentials()) "WARP" else "WARP +"
+            warpModeBtn.isSelected = state.warpEnabled
+            warpModeBtn.text = if (registeringWarp) "..." else "WARP"
+            warpModeBtn.isEnabled = !registeringWarp
             warpModeBtn.background = if (warpModeBtn.isSelected) T.ACCENT else T.BG_INPUT
             warpModeBtn.foreground = if (warpModeBtn.isSelected) Color.WHITE else T.MUTED
             pingTestBtn.isEnabled = active != null && !pinging
@@ -816,7 +878,85 @@ class BeaconDesktop(
         }
         frame.contentPane.revalidate()
         frame.contentPane.repaint()
+        syncTrayIcon()
     }
+
+    private fun isTraySupported(): Boolean =
+        runCatching { SystemTray.isSupported() }.getOrDefault(false)
+
+    private fun hideToTray(): Boolean {
+        if (!state.trayEnabled || !isTraySupported()) return false
+        syncTrayIcon()
+        if (trayIcon == null) return false
+        frame.isVisible = false
+        hero.pauseAnimation()
+        return true
+    }
+
+    private fun restoreWindow() {
+        frame.isVisible = true
+        frame.extendedState = frame.extendedState and JFrame.ICONIFIED.inv()
+        frame.toFront()
+        frame.requestFocus()
+        hero.resumeAnimation()
+    }
+
+    private fun syncTrayIcon() {
+        if (!state.trayEnabled || !isTraySupported()) {
+            removeTrayIcon()
+            return
+        }
+
+        if (trayIcon == null) {
+            val popup = PopupMenu()
+            val openItem = MenuItem("Открыть").apply {
+                addActionListener { SwingUtilities.invokeLater { restoreWindow() } }
+            }
+            trayToggleItem = MenuItem(trayToggleLabel()).apply {
+                addActionListener { SwingUtilities.invokeLater { toggleConnect() } }
+            }
+            val exitItem = MenuItem("Выход").apply {
+                addActionListener { SwingUtilities.invokeLater { shutdown() } }
+            }
+            popup.add(openItem)
+            popup.add(trayToggleItem)
+            popup.addSeparator()
+            popup.add(exitItem)
+
+            val image = appIcon.getScaledInstance(16, 16, Image.SCALE_SMOOTH)
+            val icon = TrayIcon(image, trayTooltip(), popup).apply {
+                isImageAutoSize = true
+                addActionListener { SwingUtilities.invokeLater { restoreWindow() } }
+            }
+            val added = runCatching { SystemTray.getSystemTray().add(icon) }.isSuccess
+            if (added) trayIcon = icon
+        }
+
+        trayIcon?.toolTip = trayTooltip()
+        trayToggleItem?.label = trayToggleLabel()
+        trayToggleItem?.isEnabled = !registeringWarp
+    }
+
+    private fun removeTrayIcon() {
+        trayIcon?.let { icon ->
+            runCatching { SystemTray.getSystemTray().remove(icon) }
+        }
+        trayIcon = null
+        trayToggleItem = null
+    }
+
+    private fun trayTooltip(): String {
+        val status = when {
+            registeringWarp -> "регистрация WARP"
+            connecting -> "подключение"
+            connected -> "подключено"
+            else -> "отключено"
+        }
+        return "Beacon: $status"
+    }
+
+    private fun trayToggleLabel(): String =
+        if (connected || connecting) "Отключить" else "Подключить"
 
     private fun showError(msg: String) = SwingUtilities.invokeLater {
         JOptionPane.showMessageDialog(frame, msg, "Beacon", JOptionPane.ERROR_MESSAGE)
@@ -914,9 +1054,9 @@ class BeaconDesktop(
         init {
             isOpaque = false
             layout = GridLayout(1, 2, 0, 0)
-            preferredSize = Dimension(320, 42)
-            maximumSize = Dimension(320, 42)
-            minimumSize = Dimension(320, 42)
+            preferredSize = Dimension(300, 40)
+            maximumSize = Dimension(300, 40)
+            minimumSize = Dimension(300, 40)
             ButtonGroup().apply { add(a); add(b) }
             styleToggle(a); styleToggle(b)
             add(a); add(b)

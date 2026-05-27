@@ -106,8 +106,9 @@ class LighthouseHero : JPanel() {
 
     init {
         isOpaque = false
-        preferredSize = Dimension(440, 340)
-        minimumSize = Dimension(380, 290)
+        preferredSize = Dimension(420, 260)
+        minimumSize = Dimension(280, 170)
+        maximumSize = Dimension(520, 320)
         timer.start()
     }
 

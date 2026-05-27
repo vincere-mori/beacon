@@ -66,7 +66,7 @@ dev\run-desktop-dev.bat
 Windows installer:
 
 ```bat
-dev\build-windows.bat 0.3.1
+dev\build-windows.bat 0.3.2
 ```
 
 Android APK:
@@ -78,7 +78,7 @@ Android APK:
 Linux package:
 
 ```bash
-dev/package-linux.sh 0.3.1
+dev/package-linux.sh 0.3.2
 ```
 
 ## Стек

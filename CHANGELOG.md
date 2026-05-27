@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.3.2
+
+- Desktop: adaptive window size for smaller laptop screens.
+- Desktop: moved Proxy/TUN/WARP controls to the top bar.
+- Desktop: WARP now auto-registers on new machines when enabled.
+- Desktop: optional tray mode that hides the window and pauses animation while VPN keeps running.
+
 ## v0.3.0
 
 - Linux desktop support: Beacon now runs on Linux (x86_64 / arm64) with the same feature set as Windows.
