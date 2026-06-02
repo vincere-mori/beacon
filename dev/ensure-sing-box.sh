@@ -19,7 +19,12 @@ case "$OS" in
   *) echo "Unsupported OS: $OS" >&2; exit 1 ;;
 esac
 
-VERSION="$(curl -fsSL https://api.github.com/repos/SagerNet/sing-box/releases/latest \
+AUTH_HEADER=()
+if [ -n "${GITHUB_TOKEN:-}" ]; then
+  AUTH_HEADER=(-H "Authorization: Bearer $GITHUB_TOKEN")
+fi
+
+VERSION="$(curl -fsSL "${AUTH_HEADER[@]}" https://api.github.com/repos/SagerNet/sing-box/releases/latest \
   | grep '"tag_name"' | sed 's/.*"v\([^"]*\)".*/\1/')"
 
 URL="https://github.com/SagerNet/sing-box/releases/download/v${VERSION}/sing-box-${VERSION}-${OS_TAG}-${ARCH_TAG}.tar.gz"

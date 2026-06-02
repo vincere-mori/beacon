@@ -113,6 +113,8 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
 
       - name: Build DMG
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           chmod +x dev/ensure-sing-box.sh dev/package-macos.sh
           ./gradlew :core:test :desktop:test :desktop:installDist

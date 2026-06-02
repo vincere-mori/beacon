@@ -13,6 +13,13 @@ case "$ARCH_LABEL" in
   arm64|aarch64) ARCH_LABEL="arm64" ;;
 esac
 
+IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
+if [ "${MAJOR:-0}" -le 0 ]; then
+  PACKAGE_VERSION="1.${MINOR:-0}.${PATCH:-0}"
+else
+  PACKAGE_VERSION="$VERSION"
+fi
+
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD_DIR="$REPO/build"
 PACKAGE_DIR="$BUILD_DIR/macos-package-$ARCH_LABEL"
@@ -61,7 +68,7 @@ jlink \
 jpackage \
   --type dmg \
   --name Beacon \
-  --app-version "$VERSION" \
+  --app-version "$PACKAGE_VERSION" \
   --vendor Beacon \
   --description "VLESS Reality client" \
   --input "$INPUT_DIR" \
