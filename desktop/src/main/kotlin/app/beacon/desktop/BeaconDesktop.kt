@@ -2,9 +2,12 @@ package app.beacon.desktop
 
 import app.beacon.core.model.DnsMode
 import app.beacon.core.model.ProxyProfile
+import app.beacon.core.model.RoutingMode
+import app.beacon.core.model.RoutingSettings
 import app.beacon.core.net.LatencyProbe
 import app.beacon.core.parser.ProfileInputParser
 import app.beacon.core.singbox.InboundMode
+import app.beacon.core.singbox.RoutingPlatform
 import app.beacon.core.singbox.SingBoxConfigBuilder
 import app.beacon.core.singbox.SingBoxConfigSettings
 import com.formdev.flatlaf.FlatDarkLaf
@@ -49,6 +52,9 @@ import javax.swing.JMenuItem
 import javax.swing.JOptionPane
 import javax.swing.JPanel
 import javax.swing.JPopupMenu
+import javax.swing.JRadioButton
+import javax.swing.JScrollPane
+import javax.swing.JTextArea
 import javax.swing.JToggleButton
 import javax.swing.SwingConstants
 import javax.swing.SwingUtilities
@@ -610,14 +616,23 @@ class BeaconDesktop(
             preferredSize = Dimension(130, 26)
             maximumSize = Dimension(130, 26)
             addActionListener {
-                state = state.copy(dnsMode = selectedItem as DnsMode); persist()
+                val updated = selectedItem as DnsMode
+                if (updated != state.dnsMode) {
+                    val wasConnected = connected
+                    state = state.copy(dnsMode = updated)
+                    persist()
+                    if (wasConnected) reconnectAfterModeChange()
+                }
             }
         }
         val ipv6Box = JCheckBox().apply {
             isOpaque = false
             isSelected = state.ipv6Enabled
             addActionListener {
-                state = state.copy(ipv6Enabled = isSelected); persist()
+                val wasConnected = connected
+                state = state.copy(ipv6Enabled = isSelected)
+                persist()
+                if (wasConnected) reconnectAfterModeChange()
             }
         }
         val trayBox = JCheckBox().apply {
@@ -712,6 +727,38 @@ class BeaconDesktop(
 
         content.add(Box.createVerticalStrut(14))
 
+        val routingCard = T.card().apply {
+            layout = BoxLayout(this, BoxLayout.X_AXIS)
+            alignmentX = 0f
+            maximumSize = Dimension(Int.MAX_VALUE, 72)
+            add(JPanel().apply {
+                isOpaque = false
+                layout = BoxLayout(this, BoxLayout.Y_AXIS)
+                add(JLabel(L.t("Маршрутизация", "Routing")).apply {
+                    foreground = T.TEXT
+                    font = font.deriveFont(Font.BOLD, 12f)
+                    alignmentX = 0f
+                })
+                add(JLabel(L.t(
+                    "домены, сети, процессы и WARP",
+                    "domains, networks, processes and WARP"
+                )).apply {
+                    foreground = T.MUTED
+                    font = font.deriveFont(Font.PLAIN, 11f)
+                    alignmentX = 0f
+                })
+            })
+            add(Box.createHorizontalGlue())
+            add(T.ghostButton(L.t("Настроить", "Configure")).apply {
+                addActionListener { openRoutingSettings(dlg) }
+                preferredSize = Dimension(150, 36)
+                maximumSize = Dimension(150, 36)
+            })
+        }
+        content.add(routingCard)
+
+        content.add(Box.createVerticalStrut(10))
+
         val restoreCard = T.card().apply {
             layout = BoxLayout(this, BoxLayout.X_AXIS)
             alignmentX = 0f
@@ -783,6 +830,173 @@ class BeaconDesktop(
         dlg.isVisible = true
     }
 
+    private fun openRoutingSettings(owner: JDialog) {
+        val routing = state.routing.ensureDefaults()
+        val dlg = JDialog(owner, L.t("Маршрутизация", "Routing"), true)
+        val content = JPanel().apply {
+            background = T.BG_BOT
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            border = EmptyBorder(18, 20, 18, 20)
+        }
+
+        fun textArea(values: List<String>, rows: Int = 3) = JTextArea(
+            RoutingSettings.toMultiline(values),
+            rows,
+            36
+        ).apply {
+            lineWrap = true
+            wrapStyleWord = true
+            background = T.BG_INPUT
+            foreground = T.TEXT
+            caretColor = T.TEXT
+            border = EmptyBorder(8, 10, 8, 10)
+        }
+
+        fun field(
+            title: String,
+            description: String,
+            area: JTextArea
+        ) = JPanel(BorderLayout(0, 6)).apply {
+            isOpaque = false
+            border = EmptyBorder(6, 0, 6, 0)
+            add(JPanel().apply {
+                isOpaque = false
+                layout = BoxLayout(this, BoxLayout.Y_AXIS)
+                add(JLabel(title).apply {
+                    foreground = T.TEXT
+                    font = font.deriveFont(Font.BOLD, 12f)
+                })
+                add(JLabel(description).apply {
+                    foreground = T.MUTED
+                    font = font.deriveFont(Font.PLAIN, 10f)
+                })
+            }, BorderLayout.NORTH)
+            add(JScrollPane(area).apply {
+                border = BorderFactory.createLineBorder(T.BORDER, 1)
+                viewport.background = T.BG_INPUT
+            }, BorderLayout.CENTER)
+        }
+
+        var selectedMode = routing.mode
+        val proxyAll = JRadioButton(L.t(
+            "VPN для всего, кроме списка",
+            "VPN for everything except the list"
+        )).apply {
+            isOpaque = false
+            foreground = T.TEXT
+            isSelected = selectedMode == RoutingMode.ProxyAllExcept
+            addActionListener { selectedMode = RoutingMode.ProxyAllExcept }
+        }
+        val directAll = JRadioButton(L.t(
+            "VPN только для списка",
+            "VPN only for the list"
+        )).apply {
+            isOpaque = false
+            foreground = T.TEXT
+            isSelected = selectedMode == RoutingMode.DirectAllExcept
+            addActionListener { selectedMode = RoutingMode.DirectAllExcept }
+        }
+        ButtonGroup().apply {
+            add(proxyAll)
+            add(directAll)
+        }
+
+        val domainsArea = textArea(routing.exceptionDomains)
+        val cidrsArea = textArea(routing.exceptionCidrs)
+        val processesArea = textArea(routing.desktopProcesses)
+        val warpDomainsArea = textArea(routing.warpDomains)
+        val warpCidrsArea = textArea(routing.warpCidrs)
+
+        content.add(JLabel(L.t("Маршрутизация", "Routing")).apply {
+            foreground = T.TEXT
+            font = font.deriveFont(Font.BOLD, 20f)
+        })
+        content.add(Box.createVerticalStrut(10))
+        content.add(T.card().apply {
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            border = EmptyBorder(10, 12, 10, 12)
+            add(proxyAll)
+            add(Box.createVerticalStrut(4))
+            add(directAll)
+        })
+        content.add(Box.createVerticalStrut(8))
+        content.add(field(
+            L.t("Домены", "Domains"),
+            L.t("по одному домену на строку", "one domain per line"),
+            domainsArea
+        ))
+        content.add(field(
+            "IP/CIDR",
+            L.t("например 203.0.113.0/24", "for example 203.0.113.0/24"),
+            cidrsArea
+        ))
+        content.add(field(
+            L.t("Процессы", "Processes"),
+            L.t("например firefox.exe", "for example firefox.exe"),
+            processesArea
+        ))
+        content.add(Box.createVerticalStrut(8))
+        content.add(JLabel(L.t("Маршруты WARP", "WARP routes")).apply {
+            foreground = T.TEXT
+            font = font.deriveFont(Font.BOLD, 14f)
+        })
+        content.add(field(
+            L.t("Домены через WARP", "Domains through WARP"),
+            L.t("работают, когда WARP включён", "used when WARP is enabled"),
+            warpDomainsArea
+        ))
+        content.add(field(
+            L.t("IP/CIDR через WARP", "IP/CIDR through WARP"),
+            L.t("по одному значению на строку", "one value per line"),
+            warpCidrsArea
+        ))
+        content.add(Box.createVerticalStrut(12))
+        content.add(JPanel().apply {
+            isOpaque = false
+            layout = BoxLayout(this, BoxLayout.X_AXIS)
+            add(Box.createHorizontalGlue())
+            add(T.ghostButton(L.t("Отмена", "Cancel")).apply {
+                preferredSize = Dimension(120, 36)
+                addActionListener { dlg.dispose() }
+            })
+            add(Box.createHorizontalStrut(8))
+            add(T.accentButton(L.t("Применить", "Apply")).apply {
+                preferredSize = Dimension(140, 36)
+                addActionListener {
+                    val updated = routing.copy(
+                        mode = selectedMode,
+                        exceptionDomains = RoutingSettings.parseMultiline(
+                            domainsArea.text,
+                            lowercase = true
+                        ),
+                        exceptionCidrs = RoutingSettings.parseMultiline(cidrsArea.text),
+                        desktopProcesses = RoutingSettings.parseMultiline(processesArea.text),
+                        warpDomains = RoutingSettings.parseMultiline(
+                            warpDomainsArea.text,
+                            lowercase = true
+                        ),
+                        warpCidrs = RoutingSettings.parseMultiline(warpCidrsArea.text)
+                    ).asUserConfigured()
+                    val changed = updated != state.routing.ensureDefaults()
+                    state = state.copy(routing = updated)
+                    persist()
+                    if (changed && connected) reconnectAfterModeChange()
+                    dlg.dispose()
+                }
+            })
+        })
+
+        dlg.contentPane = JScrollPane(content).apply {
+            border = null
+            viewport.background = T.BG_BOT
+            verticalScrollBar.unitIncrement = 16
+            horizontalScrollBarPolicy = JScrollPane.HORIZONTAL_SCROLLBAR_NEVER
+        }
+        dlg.size = Dimension(620, 720)
+        dlg.setLocationRelativeTo(owner)
+        dlg.isVisible = true
+    }
+
     private fun openLog() = runCatching {
         DesktopPaths.logFile.parent?.let { Files.createDirectories(it) }
         if (!DesktopPaths.logFile.exists()) DesktopPaths.logFile.createFile()
@@ -824,7 +1038,9 @@ class BeaconDesktop(
                 warpLocalAddressV6 = warp?.localAddressV6 ?: "",
                 warpPeerPublicKey = warp?.peerPublicKey ?: "",
                 warpEndpoint = warp?.endpoint?.let { WarpManager.resolveEndpoint(it) } ?: "",
-                warpReserved = warp?.reserved ?: listOf(0, 0, 0)
+                warpReserved = warp?.reserved ?: listOf(0, 0, 0),
+                routing = state.routing.ensureDefaults(),
+                platform = RoutingPlatform.Desktop
             )
         )
 

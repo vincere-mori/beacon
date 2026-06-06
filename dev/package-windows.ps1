@@ -1,5 +1,5 @@
 param(
-    [string]$Version = "0.2.0",
+    [string]$Version = "0.5.0",
     [switch]$SkipBuild
 )
 
@@ -8,13 +8,13 @@ $ErrorActionPreference = "Stop"
 $Repo = Resolve-Path (Join-Path $PSScriptRoot "..")
 $CleanVersion = $Version.TrimStart("v")
 if ($CleanVersion -notmatch "^\d+\.\d+\.\d+$") {
-    $CleanVersion = "0.2.0"
+    $CleanVersion = "0.5.0"
 }
 
 # MSI version: embed a day-stamp in the patch field (month*31+day = 32..403).
 # This makes every new build "newer" than the previous one so the installer
 # always replaces files on reinstall, even when the semver hasn't changed.
-# The user-facing filename keeps the clean semver (e.g. v0.2.0).
+# The user-facing filename keeps the clean semver (e.g. v0.5.0).
 $Major, $Minor = $CleanVersion -split '\.' | Select-Object -First 2
 $Now = Get-Date
 $DayStamp = $Now.Month * 31 + $Now.Day

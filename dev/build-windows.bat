@@ -4,7 +4,7 @@ setlocal enabledelayedexpansion
 cd /d "%~dp0.."
 
 set "VERSION=%~1"
-if "%VERSION%"=="" set "VERSION=0.2.0"
+if "%VERSION%"=="" set "VERSION=0.5.0"
 set "VERSION=%VERSION:v=%"
 
 echo ============================================================

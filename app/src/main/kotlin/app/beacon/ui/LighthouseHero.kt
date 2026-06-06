@@ -1,6 +1,6 @@
 package app.beacon.ui
 
-import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -12,14 +12,19 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameMillis
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.CacheDrawScope
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Canvas
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.CanvasDrawScope
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -76,58 +81,89 @@ fun LighthouseHero(
     val stars = remember { buildStars(70) }
 
     LaunchedEffect(Unit) {
+        var lastFrame = 0L
         while (isActive) {
             withFrameMillis { t ->
-                frameTime = t
                 val hs = heroRef
+                // быстрый sweep только при подключении -> 30 fps, иначе ambient 20 fps
+                val minStep = if (hs == LhState.CONNECTING) 32L else 48L
+                if (t - lastFrame < minStep) return@withFrameMillis
+                val dt = if (lastFrame == 0L) minStep else t - lastFrame
+                lastFrame = t
+                frameTime = t
+                val k = dt / 32.0 // нормировка под разный fps, чтобы скорость не плавала
                 val targetSpeed = when (hs) {
-                    LhState.ON -> 0.012; LhState.CONNECTING -> 0.045; LhState.OFF -> 0.0
+                    LhState.ON -> 0.024; LhState.CONNECTING -> 0.09; LhState.OFF -> 0.0
                 }
-                sweepSpeed += (targetSpeed - sweepSpeed) * 0.06
-                sweepPhase += sweepSpeed
-                for (i in waveOffsets.indices) waveOffsets[i] += 0.35f + i * 0.12f
+                sweepSpeed += (targetSpeed - sweepSpeed) * 0.12 * k
+                sweepPhase += sweepSpeed * k
+                for (i in waveOffsets.indices) waveOffsets[i] += (0.70f + i * 0.24f) * k.toFloat()
                 if (hs == LhState.ON) {
                     if (t >= nextColorShift) {
                         bulbColorTarget = if (bulbColorTarget < 0.5f) 0.9f else 0f
                         nextColorShift = t + 5000 + (Math.random() * 8000).toLong()
                     }
-                    bulbColorT += (bulbColorTarget - bulbColorT) * 0.006f
+                    bulbColorT += (bulbColorTarget - bulbColorT) * 0.012f * k.toFloat()
                 } else {
-                    bulbColorT += (0f - bulbColorT) * 0.04f
+                    bulbColorT += (0f - bulbColorT) * 0.08f * k.toFloat()
                 }
             }
         }
     }
 
-    Canvas(modifier = modifier) {
-        val w = size.width
-        val h = size.height
-        val horizonY = h * 0.66f
-        val cx = w / 2f
+    // статичные слои (небо+луна, маяк, скала) не меняются между кадрами —
+    // рендерим их один раз в bitmap, каждый кадр гоняем только динамику
+    Spacer(
+        modifier = modifier.drawWithCache {
+            val w = size.width
+            val h = size.height
+            val horizonY = h * 0.66f
+            val cx = w / 2f
 
-        val towerH = h * 0.48f
-        val baseY = h * 0.83f
-        val plinthH = towerH * 0.07f
-        val plinth2H = plinthH * 0.55f
-        val tbY = baseY - plinthH - plinth2H
-        val towerTopY = baseY - towerH + towerH * 0.20f
-        val galleryH = towerH * 0.045f
-        val galleryY = towerTopY - galleryH
-        val lantH = towerH * 0.16f
-        val lantTopY = galleryY - lantH
-        val bulbCy = lantTopY + lantH / 2f
+            val towerH = h * 0.48f
+            val baseY = h * 0.83f
+            val plinthH = towerH * 0.07f
+            val plinth2H = plinthH * 0.55f
+            val tbY = baseY - plinthH - plinth2H
+            val towerTopY = baseY - towerH + towerH * 0.20f
+            val galleryH = towerH * 0.045f
+            val galleryY = towerTopY - galleryH
+            val lantH = towerH * 0.16f
+            val lantTopY = galleryY - lantH
+            val bulbCy = lantTopY + lantH / 2f
 
-        drawLhSky(w, h)
-        drawLhMoon(w, horizonY)
-        drawLhStars(stars, w, horizonY, frameTime)
-        if (heroState != LhState.OFF) {
-            drawLhBeam(cx, bulbCy, w, horizonY, sweepPhase.toFloat(), heroState, bulbColorT, frameTime)
+            val skyLayer = staticLayer {
+                drawLhSky(w, h)
+                drawLhMoon(w, horizonY)
+            }
+            val towerLayer = staticLayer {
+                drawLhLighthouse(cx, baseY, towerH, towerTopY, tbY, galleryY, galleryH, lantTopY, lantH, plinthH, plinth2H)
+            }
+            val cliffLayer = staticLayer {
+                drawLhCliff(w, h)
+            }
+
+            onDrawBehind {
+                drawImage(skyLayer)
+                drawLhStars(stars, w, horizonY, frameTime)
+                if (heroState != LhState.OFF) {
+                    drawLhBeam(cx, bulbCy, w, horizonY, sweepPhase.toFloat(), heroState, bulbColorT, frameTime)
+                }
+                drawLhSea(w, h, horizonY, waveOffsets)
+                drawImage(towerLayer)
+                drawLhBulbGlow(cx, bulbCy, heroState, bulbColorT, frameTime)
+                drawImage(cliffLayer)
+            }
         }
-        drawLhSea(w, h, horizonY, waveOffsets)
-        drawLhLighthouse(cx, baseY, towerH, towerTopY, tbY, galleryY, galleryH, lantTopY, lantH, plinthH, plinth2H)
-        drawLhBulbGlow(cx, bulbCy, heroState, bulbColorT, frameTime)
-        drawLhCliff(w, h)
-    }
+    )
+}
+
+private fun CacheDrawScope.staticLayer(block: DrawScope.() -> Unit): ImageBitmap {
+    val wPx = size.width.toInt().coerceAtLeast(1)
+    val hPx = size.height.toInt().coerceAtLeast(1)
+    val img = ImageBitmap(wPx, hPx)
+    CanvasDrawScope().draw(this, layoutDirection, Canvas(img), size, block)
+    return img
 }
 
 private fun DrawScope.drawLhSky(w: Float, h: Float) {
@@ -215,7 +251,7 @@ private fun DrawScope.drawLhSea(w: Float, h: Float, horizonY: Float, waveOffsets
         wavePath.moveTo(x, y)
         while (x <= w + 10f) {
             wavePath.lineTo(x, y + sin((x + waveOffsets[i]) / period * PI * 2).toFloat() * amp)
-            x += 3f
+            x += 6f
         }
         drawPath(
             path = wavePath,
@@ -300,13 +336,29 @@ private fun DrawScope.drawLhLighthouse(
         color = Color(0x96788CB4), topLeft = Offset(cx - lantW / 2f, lantTopY),
         size = Size(lantW, lantH), cornerRadius = CornerRadius(6f), style = Stroke(1f)
     )
+    listOf(-0.28f, 0f, 0.28f).forEach { offset ->
+        val x = cx + lantW * offset
+        drawLine(
+            color = Color(0xAA788CB4),
+            start = Offset(x, lantTopY + 2f),
+            end = Offset(x, lantTopY + lantH - 2f),
+            strokeWidth = 1f
+        )
+    }
+    drawLine(
+        color = Color(1f, 1f, 1f, 0.18f),
+        start = Offset(cx - lantW * 0.34f, lantTopY + 3f),
+        end = Offset(cx - lantW * 0.16f, lantTopY + lantH - 3f),
+        strokeWidth = 1.4f,
+        cap = StrokeCap.Round
+    )
 
     val roofW = lantW * 1.18f
     val roofH = lantH * 1.05f
     val roofPath = Path().apply {
         moveTo(cx, lantTopY - roofH)
         lineTo(cx - roofW / 2f - 2f, lantTopY + 2f)
-        quadraticBezierTo(cx, lantTopY + 5f, cx + roofW / 2f + 2f, lantTopY + 2f)
+        quadraticTo(cx, lantTopY + 5f, cx + roofW / 2f + 2f, lantTopY + 2f)
         close()
     }
     drawPath(
@@ -318,7 +370,7 @@ private fun DrawScope.drawLhLighthouse(
     )
     val highlightPath = Path().apply {
         moveTo(cx - roofW * 0.35f, lantTopY - 2f)
-        quadraticBezierTo(cx - roofW * 0.18f, lantTopY - roofH * 0.7f, cx - 1f, lantTopY - roofH + 4f)
+        quadraticTo(cx - roofW * 0.18f, lantTopY - roofH * 0.7f, cx - 1f, lantTopY - roofH + 4f)
     }
     drawPath(highlightPath, color = Color(1f, 1f, 1f, 0.16f), style = Stroke(width = 2.5f, cap = StrokeCap.Round))
 
@@ -351,6 +403,38 @@ private fun DrawScope.drawLhBulbGlow(cx: Float, cy: Float, state: LhState, bulbC
         ),
         center = Offset(cx, cy), radius = bulbR * 4f
     )
+    val lensSize = Size(bulbR * 2.8f, bulbR * 1.9f)
+    val lensTopLeft = Offset(cx - lensSize.width / 2f, cy - lensSize.height / 2f)
+    drawOval(
+        brush = Brush.horizontalGradient(
+            colors = listOf(
+                haloColor.copy(alpha = 0.18f * onAlpha),
+                coreColor.copy(alpha = 0.82f * onAlpha),
+                haloColor.copy(alpha = 0.18f * onAlpha)
+            ),
+            startX = lensTopLeft.x,
+            endX = lensTopLeft.x + lensSize.width
+        ),
+        topLeft = lensTopLeft,
+        size = lensSize
+    )
+    drawOval(
+        color = Color(0xFFCFE8FF).copy(alpha = 0.72f),
+        topLeft = lensTopLeft,
+        size = lensSize,
+        style = Stroke(1f)
+    )
+    for (step in -2..2) {
+        val y = cy + step * lensSize.height / 7f
+        val halfWidth = lensSize.width * (0.42f - kotlin.math.abs(step) * 0.035f)
+        drawLine(
+            color = Color.White.copy(alpha = 0.34f * onAlpha),
+            start = Offset(cx - halfWidth, y),
+            end = Offset(cx + halfWidth, y),
+            strokeWidth = 0.8f,
+            cap = StrokeCap.Round
+        )
+    }
     drawCircle(coreColor, radius = bulbR, center = Offset(cx, cy))
     drawCircle(Color(1f, 1f, 1f, 0.86f), radius = 2f, center = Offset(cx - bulbR * 0.35f - 1f, cy - bulbR * 0.35f - 1f))
 }

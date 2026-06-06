@@ -117,7 +117,10 @@ class SharedPrefsProfileRepository(context: Context) : ProfileRepository {
 
     private fun loadSettings(): BeaconSettings {
         val raw = securePrefs.getString(KEY_SETTINGS) ?: return BeaconSettings()
-        return runCatching { json.decodeFromString<BeaconSettings>(raw) }.getOrDefault(BeaconSettings())
+        val decoded = runCatching {
+            json.decodeFromString<BeaconSettings>(raw)
+        }.getOrDefault(BeaconSettings())
+        return decoded.copy(routing = decoded.routing.ensureDefaults())
     }
 
     private fun writeProfiles(value: List<ProxyProfile>) {

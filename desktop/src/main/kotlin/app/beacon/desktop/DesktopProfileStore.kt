@@ -3,6 +3,7 @@ package app.beacon.desktop
 import app.beacon.core.model.ProxyProfile
 import app.beacon.core.model.Subscription
 import app.beacon.core.model.DnsMode
+import app.beacon.core.model.RoutingSettings
 import app.beacon.core.singbox.InboundMode
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
@@ -24,7 +25,9 @@ class DesktopProfileStore(
     fun load(): DesktopProfileState {
         if (!file.exists()) return DesktopProfileState()
         return runCatching {
-            json.decodeFromString<DesktopProfileState>(secretBox.unprotect(Files.readString(file)))
+            json.decodeFromString<DesktopProfileState>(
+                secretBox.unprotect(Files.readString(file))
+            ).migrated()
         }.getOrDefault(DesktopProfileState())
     }
 
@@ -46,6 +49,7 @@ data class DesktopProfileState(
     val inboundMode: InboundMode = InboundMode.Mixed,
     val warpEnabled: Boolean = false,
     val warpCredentials: WarpCredentials? = null,
+    val routing: RoutingSettings = RoutingSettings.defaults(),
     val trayEnabled: Boolean = true,
     val language: AppLanguage = AppLanguage.RU,
     val trayNoticeShown: Boolean = false
@@ -56,4 +60,6 @@ data class DesktopProfileState(
 
     val activeProfile: ProxyProfile?
         get() = allProfiles.let { all -> all.firstOrNull { it.id == activeProfileId } ?: all.firstOrNull() }
+
+    fun migrated(): DesktopProfileState = copy(routing = routing.ensureDefaults())
 }

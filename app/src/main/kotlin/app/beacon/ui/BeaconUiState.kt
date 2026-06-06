@@ -16,6 +16,8 @@ data class BeaconUiState(
     val lastError: String? = null,
     val settings: BeaconSettings = BeaconSettings(),
     val isBusy: Boolean = false,
+    val trafficUpBytesPerSec: Long = 0,
+    val trafficDownBytesPerSec: Long = 0,
     val pingResults: Map<String, Long?> = emptyMap(),
     val pingingIds: Set<String> = emptySet()
 )

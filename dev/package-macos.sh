@@ -4,7 +4,7 @@
 # Requires: JDK 17+, jpackage, sips, iconutil, curl
 set -euo pipefail
 
-VERSION="${1:-0.2.0}"
+VERSION="${1:-0.5.0}"
 VERSION="${VERSION#v}"
 ARCH_LABEL="${2:-$(uname -m)}"
 

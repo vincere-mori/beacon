@@ -1,10 +1,13 @@
 package app.beacon
 
 import android.app.Application
+import android.net.TrafficStats
+import android.os.Process
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import app.beacon.core.model.DnsMode
 import app.beacon.core.model.ProxyProfile
+import app.beacon.core.model.RoutingSettings
 import app.beacon.core.model.Subscription
 import app.beacon.core.net.LatencyProbe
 import app.beacon.core.net.SubscriptionFetcher
@@ -12,6 +15,7 @@ import app.beacon.core.parser.ProfileInputParser
 import app.beacon.core.parser.SubscriptionParser
 import app.beacon.core.singbox.SingBoxConfigBuilder
 import app.beacon.core.singbox.SingBoxConfigSettings
+import app.beacon.core.singbox.RoutingPlatform
 import app.beacon.data.BeaconSettings
 import app.beacon.data.ProfileRepository
 import app.beacon.data.SharedPrefsProfileRepository
@@ -20,13 +24,20 @@ import app.beacon.ui.BeaconUiState
 import app.beacon.ui.ConnectionStatusText
 import app.beacon.vpn.SingBoxVpnGateway
 import app.beacon.vpn.VpnGateway
+import app.beacon.vpn.VpnStatus
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
 import java.net.URI
 import java.util.UUID
@@ -45,6 +56,7 @@ class MainViewModel(
     private val draftKey = MutableStateFlow("")
     private val lastError = MutableStateFlow<String?>(null)
     private val busy = MutableStateFlow(false)
+    private val traffic = MutableStateFlow(TrafficSample())
 
     private val pingResults = MutableStateFlow<Map<String, Long?>>(emptyMap())
     private val pingingIds = MutableStateFlow<Set<String>>(emptySet())
@@ -85,7 +97,12 @@ class MainViewModel(
         PingSnapshot(results, pinging)
     }
 
-    val state: StateFlow<BeaconUiState> = combine(profileSnapshot, uiInputs, pingSnapshot) { snapshot, inputs, ping ->
+    val state: StateFlow<BeaconUiState> = combine(
+        profileSnapshot,
+        uiInputs,
+        pingSnapshot,
+        traffic
+    ) { snapshot, inputs, ping, trafficSample ->
         BeaconUiState(
             selectedTab = inputs.selectedTab,
             profiles = snapshot.profiles,
@@ -97,6 +114,8 @@ class MainViewModel(
             lastError = inputs.lastError ?: inputs.vpnState.error,
             settings = snapshot.settings,
             isBusy = inputs.isBusy,
+            trafficUpBytesPerSec = trafficSample.up,
+            trafficDownBytesPerSec = trafficSample.down,
             pingResults = ping.results,
             pingingIds = ping.pinging
         )
@@ -105,6 +124,18 @@ class MainViewModel(
         started = SharingStarted.WhileSubscribed(5_000),
         initialValue = BeaconUiState()
     )
+
+    init {
+        viewModelScope.launch {
+            vpnGateway.observeState().collectLatest { vpnState ->
+                if (vpnState.status == VpnStatus.Connected) {
+                    monitorTraffic()
+                } else {
+                    traffic.value = TrafficSample()
+                }
+            }
+        }
+    }
 
     fun selectTab(tab: BeaconTab) {
         selectedTab.value = tab
@@ -193,15 +224,28 @@ class MainViewModel(
         }
     }
 
-    fun setDnsMode(mode: DnsMode) {
+    fun saveDnsSettings(mode: DnsMode, customDnsInput: String, useCustomDns: Boolean) {
         runAction {
-            repository.updateSettings(repository.currentSettings().copy(dnsMode = mode))
+            val current = repository.currentSettings()
+            val updated = current.copy(
+                dnsMode = mode,
+                customDnsServers = if (useCustomDns) parseDnsServers(customDnsInput) else emptyList()
+            )
+            saveSettings(current, updated)
         }
     }
 
     fun setIpv6Enabled(enabled: Boolean) {
         runAction {
-            repository.updateSettings(repository.currentSettings().copy(ipv6Enabled = enabled))
+            val current = repository.currentSettings()
+            saveSettings(current, current.copy(ipv6Enabled = enabled))
+        }
+    }
+
+    fun saveRoutingSettings(routing: RoutingSettings) {
+        runAction {
+            val current = repository.currentSettings()
+            saveSettings(current, current.copy(routing = routing.asUserConfigured()))
         }
     }
 
@@ -209,15 +253,7 @@ class MainViewModel(
         runAction {
             val profile = repository.currentActiveProfile()
                 ?: throw IllegalStateException("сначала добавь ключ")
-            val settings = repository.currentSettings()
-            val config = configBuilder.build(
-                profile = profile,
-                settings = SingBoxConfigSettings(
-                    dnsMode = settings.dnsMode,
-                    ipv6Enabled = settings.ipv6Enabled
-                )
-            )
-            vpnGateway.connect(config)
+            connect(profile, repository.currentSettings())
         }
     }
 
@@ -230,6 +266,70 @@ class MainViewModel(
     private fun subscriptionName(url: String): String {
         val host = runCatching { URI(url).host }.getOrNull()?.takeIf { it.isNotBlank() }
         return host ?: "Подписка"
+    }
+
+    private suspend fun saveSettings(current: BeaconSettings, updated: BeaconSettings) {
+        if (current == updated) return
+        repository.updateSettings(updated)
+        if (state.value.status == VpnStatus.Connected) {
+            vpnGateway.disconnect()
+            withTimeoutOrNull(3_000) {
+                vpnGateway.observeState().first { it.status == VpnStatus.Disconnected }
+            }
+            val profile = repository.currentActiveProfile()
+                ?: throw IllegalStateException("сначала добавь ключ")
+            connect(profile, updated)
+        }
+    }
+
+    private fun parseDnsServers(input: String): List<String> {
+        val values = input
+            .split(',', '\n')
+            .map(String::trim)
+            .filter(String::isNotEmpty)
+            .distinct()
+        if (values.isEmpty()) throw IllegalArgumentException("укажи хотя бы один DNS")
+        if (values.size > 1) throw IllegalArgumentException("укажи один DNS-сервер")
+        if (values.any { it.startsWith("http://", ignoreCase = true) }) {
+            throw IllegalArgumentException("для DoH используй https://")
+        }
+        return values
+    }
+
+    private suspend fun connect(profile: ProxyProfile, settings: BeaconSettings) {
+        val config = configBuilder.build(
+            profile = profile,
+            settings = SingBoxConfigSettings(
+                dnsMode = settings.dnsMode,
+                customDnsServers = settings.customDnsServers,
+                ipv6Enabled = settings.ipv6Enabled,
+                routing = settings.routing.ensureDefaults(),
+                platform = RoutingPlatform.Android
+            )
+        )
+        vpnGateway.connect(config)
+    }
+
+    private suspend fun monitorTraffic() {
+        val uid = Process.myUid()
+        var previousRx = TrafficStats.getUidRxBytes(uid)
+        var previousTx = TrafficStats.getUidTxBytes(uid)
+        while (currentCoroutineContext().isActive) {
+            delay(1_000)
+            val currentRx = TrafficStats.getUidRxBytes(uid)
+            val currentTx = TrafficStats.getUidTxBytes(uid)
+            traffic.value = TrafficSample(
+                up = counterDelta(previousTx, currentTx),
+                down = counterDelta(previousRx, currentRx)
+            )
+            previousRx = currentRx
+            previousTx = currentTx
+        }
+    }
+
+    private fun counterDelta(previous: Long, current: Long): Long {
+        if (previous < 0 || current < 0) return 0
+        return (current - previous).coerceAtLeast(0)
     }
 
     private fun runAction(block: suspend () -> Unit) {
@@ -260,5 +360,10 @@ class MainViewModel(
     private data class PingSnapshot(
         val results: Map<String, Long?>,
         val pinging: Set<String>
+    )
+
+    private data class TrafficSample(
+        val up: Long = 0,
+        val down: Long = 0
     )
 }

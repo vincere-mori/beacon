@@ -2,6 +2,8 @@ package app.beacon.core.singbox
 
 import app.beacon.core.model.DnsMode
 import app.beacon.core.model.ProxyProfile
+import app.beacon.core.model.RoutingMode
+import app.beacon.core.model.RoutingSettings
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -18,12 +20,14 @@ class SingBoxConfigBuilder(
 ) {
     fun build(profile: ProxyProfile, settings: SingBoxConfigSettings = SingBoxConfigSettings()): String {
         val vless = profile.vless ?: error("vless profile missing")
+        val routing = settings.routing.ensureDefaults()
+        val proxySupportsUdp = vless.flow == null
         val config = buildJsonObject {
             put("log", buildJsonObject {
                 put("level", "info")
                 put("timestamp", true)
             })
-            put("dns", dns(settings, vless.server))
+            put("dns", dns(settings, routing, vless.server))
             if (settings.warpEnabled && settings.warpPrivateKey.isNotBlank()) {
                 put("endpoints", buildJsonArray {
                     add(warpEndpoint(settings))
@@ -41,7 +45,7 @@ class SingBoxConfigBuilder(
                 add(vlessOutbound(profile))
                 add(taggedOutbound("direct", "direct"))
             })
-            put("route", route(settings))
+            put("route", route(settings, routing, proxySupportsUdp))
             put("experimental", buildJsonObject {
                 put("clash_api", buildJsonObject {
                     put("external_controller", "127.0.0.1:${settings.clashApiPort}")
@@ -53,39 +57,62 @@ class SingBoxConfigBuilder(
         return json.encodeToString(JsonObject.serializer(), config)
     }
 
-    private fun dns(settings: SingBoxConfigSettings, proxyServer: String): JsonObject {
+    private fun dns(
+        settings: SingBoxConfigSettings,
+        routing: RoutingSettings,
+        proxyServer: String
+    ): JsonObject {
+        val customDns = settings.customDnsServers.mapNotNull(::parseCustomDnsServer)
+        val remoteDns = customDns.firstOrNull()
+        val bootstrapServer = customDns.firstOrNull { !it.needsDomainResolver }?.server ?: "1.1.1.1"
+        val directDomains = if (routing.mode == RoutingMode.ProxyAllExcept) {
+            (routing.exceptionDomains + RoutingSettings.builtInLocalDomains()).distinct()
+        } else {
+            emptyList()
+        }
+        val proxyDomains = if (routing.mode == RoutingMode.DirectAllExcept) {
+            routing.exceptionDomains
+        } else {
+            emptyList()
+        }
+        val directDnsTag = if (settings.platform == RoutingPlatform.Android) "local" else "direct-dns"
+
         return buildJsonObject {
             put("strategy", if (settings.ipv6Enabled) "prefer_ipv4" else "ipv4_only")
             put("servers", buildJsonArray {
-                // Bootstrap: plain UDP for resolving the proxy/DoH server hostname
                 add(buildJsonObject {
                     put("type", "udp")
                     put("tag", "bootstrap")
-                    put("server", "1.1.1.1")
+                    put("server", bootstrapServer)
                 })
-                // Remote: DoH through the VLESS proxy — resolves everything else
                 add(buildJsonObject {
-                    put("type", "https")
+                    put("type", remoteDns?.type ?: "https")
                     put("tag", "remote")
-                    put("server", settings.dnsMode.server)
-                    put("path", settings.dnsMode.path)
-                    if (settings.dnsMode.needsDomainResolver) {
+                    put("server", remoteDns?.server ?: settings.dnsMode.server)
+                    val path = remoteDns?.path ?: settings.dnsMode.path
+                    if ((remoteDns?.type ?: "https") == "https") {
+                        put("path", path)
+                    }
+                    if (
+                        remoteDns?.needsDomainResolver == true ||
+                        (remoteDns == null && settings.dnsMode.needsDomainResolver)
+                    ) {
                         put("domain_resolver", "bootstrap")
                     }
                     put("detour", "proxy")
                 })
-                // Direct DNS for Russian domains — Yandex DNS, bypasses VPN
-                // so Russian CDNs return local IPs instead of foreign ones.
-                add(buildJsonObject {
-                    put("type", "udp")
-                    put("tag", "ru-direct")
-                    put("server", "77.88.8.8")
-                })
-                // Note: we intentionally do NOT add a warp-dns server here.
-                // WireGuard endpoints are L3 tunnels and cannot be used as DNS detour
-                // (which requires an L4 connection). Google domains are resolved via
-                // the normal "remote" server; the route rule then sends the actual
-                // traffic through the WARP endpoint. DNS and routing are independent.
+                if (settings.platform == RoutingPlatform.Android) {
+                    add(buildJsonObject {
+                        put("type", "local")
+                        put("tag", directDnsTag)
+                    })
+                } else {
+                    add(buildJsonObject {
+                        put("type", "udp")
+                        put("tag", directDnsTag)
+                        put("server", "77.88.8.8")
+                    })
+                }
             })
             put("rules", buildJsonArray {
                 if (!proxyServer.isIpAddress()) {
@@ -94,55 +121,22 @@ class SingBoxConfigBuilder(
                         put("server", "bootstrap")
                     })
                 }
-                // Russian domains → resolve via direct Yandex DNS
-                add(buildJsonObject {
-                    put("domain_suffix", buildJsonArray {
-                        ruBypassDomains().forEach { add(JsonPrimitive(it)) }
+                if (directDomains.isNotEmpty()) {
+                    add(buildJsonObject {
+                        put("domain_suffix", jsonValues(directDomains))
+                        put("server", directDnsTag)
                     })
-                    put("server", "ru-direct")
-                })
+                }
+                if (proxyDomains.isNotEmpty()) {
+                    add(buildJsonObject {
+                        put("domain_suffix", jsonValues(proxyDomains))
+                        put("server", "remote")
+                    })
+                }
             })
-            put("final", "remote")
+            put("final", if (routing.mode == RoutingMode.DirectAllExcept) directDnsTag else "remote")
         }
     }
-
-    private fun warpDomains() = listOf(
-        "google.com", "googleapis.com", "googleusercontent.com",
-        "gstatic.com", "ggpht.com", "gvt1.com", "gvt2.com", "gvt3.com",
-        "recaptcha.net", "youtube.com", "youtubei.googleapis.com",
-        "googlevideo.com", "ytimg.com", "ai.google.dev",
-        // Discord — voice/QUIC over UDP often fails through a VLESS hop;
-        // Cloudflare WireGuard handles UDP cleanly, so route Discord there
-        // when WARP is enabled.
-        "discord.com", "discord.gg", "discord.media",
-        "discordapp.com", "discordapp.net"
-    )
-
-    /**
-     * Russian domains that should bypass the VPN and connect directly.
-     * Russian websites commonly block foreign IPs, so routing them through
-     * a VPN server abroad causes access issues. These domains are resolved
-     * via direct DNS (Yandex 77.88.8.8) and routed to the "direct" outbound.
-     */
-    private fun ruBypassDomains() = listOf(
-        // ── Top-level Russian domains ─────────────────────────────────────
-        "ru",                           // .ru — covers yandex.ru, mail.ru, sber.ru, etc.
-        "xn--p1ai",                     // .рф (punycode) — госуслуги.рф, etc.
-        "su",                           // .su — legacy Soviet TLD, still active
-        // ── Popular Russian services on non-.ru TLDs ─────────────────────
-        // VK ecosystem
-        "vk.com", "vk.me", "vk.cc",
-        "vkuserid.com", "vkuservideo.net",
-        // Mail.ru / VK CDN
-        "mycdn.me",
-        // Streaming
-        "okko.tv", "more.tv",
-        // Media
-        "rt.com",
-        // Yandex international domains
-        "yandex.com", "yandex.net", "yandex.by", "yandex.kz",
-        "ya.ru"
-    )
 
     private fun tun(settings: SingBoxConfigSettings): JsonObject {
         val address = if (settings.ipv6Enabled) {
@@ -150,14 +144,17 @@ class SingBoxConfigBuilder(
         } else {
             listOf("172.19.0.1/30")
         }
+        val mtu = if (settings.platform == RoutingPlatform.Android) 1400 else 9000
+        val stack = if (settings.platform == RoutingPlatform.Android) "system" else "mixed"
 
         return buildJsonObject {
             put("type", "tun")
             put("tag", "tun-in")
             put("address", JsonArray(address.map(::JsonPrimitive)))
+            put("mtu", mtu)
             put("auto_route", true)
             put("strict_route", true)
-            put("stack", "mixed")
+            put("stack", stack)
             // Required for Discord voice / WebRTC / online games — without it
             // sing-box looks like a symmetric NAT and STUN cannot pair peers.
             put("endpoint_independent_nat", true)
@@ -265,44 +262,181 @@ class SingBoxConfigBuilder(
         return host to port
     }
 
-    private fun route(settings: SingBoxConfigSettings = SingBoxConfigSettings()): JsonObject {
+    private fun route(
+        settings: SingBoxConfigSettings,
+        routing: RoutingSettings,
+        proxySupportsUdp: Boolean
+    ): JsonObject {
+        val proxyOnlySelected = routing.mode == RoutingMode.DirectAllExcept
+        val finalOutbound = if (proxyOnlySelected) "direct" else "proxy"
+        val warpActive = settings.warpEnabled && settings.warpPrivateKey.isNotBlank()
+
         return buildJsonObject {
             put("auto_detect_interface", true)
             put("default_domain_resolver", "remote")
+            if (routing.androidPackages.isNotEmpty() || routing.desktopProcesses.isNotEmpty()) {
+                put("find_process", true)
+            }
             put("rules", buildJsonArray {
                 add(buildJsonObject { put("action", "sniff") })
                 add(buildJsonObject { put("protocol", "dns"); put("action", "hijack-dns") })
-                add(buildJsonObject { put("ip_is_private", true); put("action", "route"); put("outbound", "direct") })
-                // Russian domains → bypass VPN, go direct.
-                // Russian sites block foreign IPs; routing them through the
-                // proxy server abroad breaks access.
                 add(buildJsonObject {
-                    put("domain_suffix", buildJsonArray {
-                        ruBypassDomains().forEach { add(JsonPrimitive(it)) }
-                    })
+                    put("ip_cidr", jsonValues(RoutingSettings.builtInLocalCidrs()))
                     put("action", "route")
                     put("outbound", "direct")
                 })
-                if (settings.warpEnabled && settings.warpPrivateKey.isNotBlank()) {
-                    add(buildJsonObject {
-                        put("domain_suffix", buildJsonArray {
-                            warpDomains().forEach { add(JsonPrimitive(it)) }
+                add(buildJsonObject { put("ip_is_private", true); put("action", "route"); put("outbound", "direct") })
+
+                if (warpActive) {
+                    addDomainOrIpRule(this, routing.warpDomains, routing.warpCidrs, "warp")
+                    if (!proxySupportsUdp) {
+                        add(buildJsonObject {
+                            put("network", "udp")
+                            put("action", "route")
+                            put("outbound", "warp")
                         })
-                        put("action", "route")
-                        put("outbound", "warp")
-                    })
-                    // Если основной vless имеет flow=xtls-rprx-vision, UDP через
-                    // proxy не пройдёт. Сваливаем весь оставшийся UDP в WARP —
-                    // это спасает QUIC, WebRTC и игровой UDP без серверных правок.
-                    add(buildJsonObject {
-                        put("network", "udp")
-                        put("action", "route")
-                        put("outbound", "warp")
-                    })
+                    }
+                } else if (!proxySupportsUdp) {
+                    if (proxyOnlySelected) {
+                        addPlatformRejectRule(this, settings.platform, routing)
+                        addDomainOrIpRejectRule(this, routing.exceptionDomains, routing.exceptionCidrs)
+                    } else {
+                        add(buildJsonObject {
+                            put("protocol", jsonValues(listOf("quic")))
+                            put("action", "reject")
+                        })
+                    }
+                }
+
+                if (proxyOnlySelected) {
+                    addPlatformRule(this, settings.platform, routing, "proxy")
+                    addDomainOrIpRule(
+                        this,
+                        routing.exceptionDomains,
+                        routing.exceptionCidrs,
+                        "proxy"
+                    )
+                } else {
+                    addPlatformRule(this, settings.platform, routing, "direct")
+                    addDomainOrIpRule(
+                        this,
+                        (routing.exceptionDomains + RoutingSettings.builtInLocalDomains()).distinct(),
+                        routing.exceptionCidrs,
+                        "direct"
+                    )
                 }
             })
-            put("final", "proxy")
+            put("final", finalOutbound)
         }
+    }
+
+    private fun addPlatformRule(
+        array: kotlinx.serialization.json.JsonArrayBuilder,
+        platform: RoutingPlatform,
+        routing: RoutingSettings,
+        outbound: String
+    ) {
+        val values = when (platform) {
+            RoutingPlatform.Android -> routing.androidPackages
+            RoutingPlatform.Desktop -> routing.desktopProcesses
+        }
+        if (values.isEmpty()) return
+        array.add(buildJsonObject {
+            put(
+                if (platform == RoutingPlatform.Android) "package_name" else "process_name",
+                jsonValues(values)
+            )
+            put("action", "route")
+            put("outbound", outbound)
+        })
+    }
+
+    private fun addPlatformRejectRule(
+        array: kotlinx.serialization.json.JsonArrayBuilder,
+        platform: RoutingPlatform,
+        routing: RoutingSettings
+    ) {
+        val values = when (platform) {
+            RoutingPlatform.Android -> routing.androidPackages
+            RoutingPlatform.Desktop -> routing.desktopProcesses
+        }
+        if (values.isEmpty()) return
+        array.add(buildJsonObject {
+            put("protocol", jsonValues(listOf("quic")))
+            put(
+                if (platform == RoutingPlatform.Android) "package_name" else "process_name",
+                jsonValues(values)
+            )
+            put("action", "reject")
+        })
+    }
+
+    private fun addDomainOrIpRejectRule(
+        array: kotlinx.serialization.json.JsonArrayBuilder,
+        domains: List<String>,
+        cidrs: List<String>
+    ) {
+        if (domains.isNotEmpty()) {
+            array.add(buildJsonObject {
+                put("protocol", jsonValues(listOf("quic")))
+                put("domain_suffix", jsonValues(domains))
+                put("action", "reject")
+            })
+        }
+        if (cidrs.isNotEmpty()) {
+            array.add(buildJsonObject {
+                put("protocol", jsonValues(listOf("quic")))
+                put("ip_cidr", jsonValues(cidrs))
+                put("action", "reject")
+            })
+        }
+    }
+
+    private fun addDomainOrIpRule(
+        array: kotlinx.serialization.json.JsonArrayBuilder,
+        domains: List<String>,
+        cidrs: List<String>,
+        outbound: String
+    ) {
+        if (domains.isNotEmpty()) {
+            array.add(buildJsonObject {
+                put("domain_suffix", jsonValues(domains))
+                put("action", "route")
+                put("outbound", outbound)
+            })
+        }
+        if (cidrs.isNotEmpty()) {
+            array.add(buildJsonObject {
+                put("ip_cidr", jsonValues(cidrs))
+                put("action", "route")
+                put("outbound", outbound)
+            })
+        }
+    }
+
+    private fun jsonValues(values: List<String>) = JsonArray(values.map(::JsonPrimitive))
+
+    private fun parseCustomDnsServer(raw: String): ConfiguredDnsServer? {
+        val value = raw.trim().removeSuffix("/")
+        if (value.isEmpty()) return null
+        if (value.startsWith("https://", ignoreCase = true)) {
+            val withoutScheme = value.substringAfter("://")
+            val server = withoutScheme.substringBefore('/').trim()
+            if (server.isEmpty()) return null
+            return ConfiguredDnsServer(
+                type = "https",
+                server = server,
+                path = "/" + withoutScheme.substringAfter('/', "dns-query")
+                    .trimStart('/')
+                    .ifBlank { "dns-query" },
+                needsDomainResolver = !server.isIpAddress()
+            )
+        }
+        return ConfiguredDnsServer(
+            type = "udp",
+            server = value,
+            needsDomainResolver = !value.isIpAddress()
+        )
     }
 
     private fun String.isIpAddress(): Boolean {
@@ -310,8 +444,16 @@ class SingBoxConfigBuilder(
     }
 }
 
+private data class ConfiguredDnsServer(
+    val type: String,
+    val server: String,
+    val path: String? = null,
+    val needsDomainResolver: Boolean = false
+)
+
 data class SingBoxConfigSettings(
     val dnsMode: DnsMode = DnsMode.Cloudflare,
+    val customDnsServers: List<String> = emptyList(),
     val ipv6Enabled: Boolean = false,
     val inboundMode: InboundMode = InboundMode.Tun,
     val mixedListenHost: String = "127.0.0.1",
@@ -323,5 +465,12 @@ data class SingBoxConfigSettings(
     val warpLocalAddressV6: String = "",
     val warpPeerPublicKey: String = "",
     val warpEndpoint: String = "",
-    val warpReserved: List<Int> = listOf(0, 0, 0)
+    val warpReserved: List<Int> = listOf(0, 0, 0),
+    val routing: RoutingSettings = RoutingSettings.defaults(),
+    val platform: RoutingPlatform = RoutingPlatform.Desktop
 )
+
+enum class RoutingPlatform {
+    Android,
+    Desktop
+}

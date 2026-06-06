@@ -1,6 +1,7 @@
 package app.beacon
 
 import android.Manifest
+import android.app.Activity
 import android.content.Intent
 import android.net.VpnService
 import android.os.Build
@@ -24,8 +25,10 @@ class MainActivity : ComponentActivity() {
 
     private val vpnPermission = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
-    ) {
-        viewModel.connect()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            viewModel.connect()
+        }
     }
 
     private val notificationPermission = registerForActivityResult(
@@ -43,6 +46,13 @@ class MainActivity : ComponentActivity() {
                 onConnectRequested = ::requestPermissionsThenConnect
             )
         }
+        handleLaunchIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleLaunchIntent(intent)
     }
 
     private fun requestPermissionsThenConnect() {
@@ -59,6 +69,22 @@ class MainActivity : ComponentActivity() {
             vpnPermission.launch(intent)
         } else {
             viewModel.connect()
+        }
+    }
+
+    private fun handleLaunchIntent(intent: Intent?) {
+        if (intent?.getBooleanExtra(EXTRA_CONNECT_FROM_TILE, false) != true) return
+        intent.removeExtra(EXTRA_CONNECT_FROM_TILE)
+        requestPermissionsThenConnect()
+    }
+
+    companion object {
+        private const val EXTRA_CONNECT_FROM_TILE = "connect_from_tile"
+
+        fun connectFromTileIntent(context: android.content.Context): Intent {
+            return Intent(context, MainActivity::class.java)
+                .putExtra(EXTRA_CONNECT_FROM_TILE, true)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
         }
     }
 }

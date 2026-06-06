@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.5.0
+
+- Added configurable split tunneling for domains, CIDRs, Android apps and desktop processes.
+- Added custom DNS support and automatic reconnect after network setting changes.
+- Android: added Quick Settings tile, traffic speed, local DNS routing and network handoff handling.
+- Android: kept the Beacon design, improved the lighthouse animation and added a Fresnel lens.
+- Desktop: added routing and WARP route settings without changing the main layout.
+
 ## v0.4.2
 
 - macOS: added DMG release builds for Apple Silicon and Intel.

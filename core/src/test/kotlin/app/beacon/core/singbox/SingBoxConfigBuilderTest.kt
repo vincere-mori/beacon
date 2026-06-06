@@ -1,6 +1,8 @@
 package app.beacon.core.singbox
 
 import app.beacon.core.model.DnsMode
+import app.beacon.core.model.RoutingMode
+import app.beacon.core.model.RoutingSettings
 import app.beacon.core.parser.ProfileInputParser
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.int
@@ -9,6 +11,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -128,4 +131,136 @@ class SingBoxConfigBuilderTest {
         assertEquals("dns.google", remote["server"]!!.jsonPrimitive.content)
         assertEquals("bootstrap", remote["domain_resolver"]!!.jsonPrimitive.content)
     }
+
+    @Test
+    fun buildsAndroidSplitRouting() {
+        val config = Json.parseToJsonElement(
+            builder.build(
+                sampleProfile(),
+                SingBoxConfigSettings(
+                    routing = RoutingSettings(
+                        mode = RoutingMode.ProxyAllExcept,
+                        exceptionDomains = listOf("example.org"),
+                        exceptionCidrs = listOf("203.0.113.0/24"),
+                        androidPackages = listOf("org.example.app"),
+                        defaultsInitialized = true
+                    ),
+                    platform = RoutingPlatform.Android
+                )
+            )
+        ).jsonObject
+
+        val inbound = config["inbounds"]!!.jsonArray.first().jsonObject
+        val route = config["route"]!!.jsonObject
+        val rules = route["rules"]!!.jsonArray.map { it.jsonObject }
+        val dns = config["dns"]!!.jsonObject
+
+        assertEquals("system", inbound["stack"]!!.jsonPrimitive.content)
+        assertEquals(1400, inbound["mtu"]!!.jsonPrimitive.int)
+        assertEquals("proxy", route["final"]!!.jsonPrimitive.content)
+        assertTrue(route["find_process"]!!.jsonPrimitive.content.toBoolean())
+        assertTrue(rules.any {
+            it["package_name"]?.jsonArray?.first()?.jsonPrimitive?.content == "org.example.app" &&
+                it["outbound"]?.jsonPrimitive?.content == "direct"
+        })
+        assertTrue(rules.any {
+            it["domain_suffix"]?.jsonArray?.first()?.jsonPrimitive?.content == "example.org" &&
+                it["outbound"]?.jsonPrimitive?.content == "direct"
+        })
+        assertTrue(rules.any {
+            it["ip_cidr"]?.jsonArray?.first()?.jsonPrimitive?.content == "203.0.113.0/24" &&
+                it["outbound"]?.jsonPrimitive?.content == "direct"
+        })
+        assertEquals("remote", dns["final"]!!.jsonPrimitive.content)
+        assertTrue(dns["servers"]!!.jsonArray.any {
+            it.jsonObject["tag"]?.jsonPrimitive?.content == "local" &&
+                it.jsonObject["type"]?.jsonPrimitive?.content == "local"
+        })
+    }
+
+    @Test
+    fun directModeOnlyProxiesSelectedTraffic() {
+        val config = Json.parseToJsonElement(
+            builder.build(
+                sampleProfile(),
+                SingBoxConfigSettings(
+                    routing = RoutingSettings(
+                        mode = RoutingMode.DirectAllExcept,
+                        exceptionDomains = listOf("example.org"),
+                        defaultsInitialized = true
+                    ),
+                    platform = RoutingPlatform.Android
+                )
+            )
+        ).jsonObject
+
+        val route = config["route"]!!.jsonObject
+        val rules = route["rules"]!!.jsonArray.map { it.jsonObject }
+        val dns = config["dns"]!!.jsonObject
+
+        assertEquals("direct", route["final"]!!.jsonPrimitive.content)
+        assertTrue(rules.any {
+            it["domain_suffix"]?.jsonArray?.first()?.jsonPrimitive?.content == "example.org" &&
+                it["outbound"]?.jsonPrimitive?.content == "proxy"
+        })
+        assertEquals("local", dns["final"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun writesCustomDnsServer() {
+        val config = Json.parseToJsonElement(
+            builder.build(
+                sampleProfile(),
+                SingBoxConfigSettings(
+                    customDnsServers = listOf("https://dns.example/dns-query")
+                )
+            )
+        ).jsonObject
+        val remote = config["dns"]!!.jsonObject["servers"]!!.jsonArray
+            .first { it.jsonObject["tag"]?.jsonPrimitive?.content == "remote" }
+            .jsonObject
+
+        assertEquals("https", remote["type"]!!.jsonPrimitive.content)
+        assertEquals("dns.example", remote["server"]!!.jsonPrimitive.content)
+        assertEquals("/dns-query", remote["path"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun keepsWarpDefaultsAndDoesNotRejectQuicWhenWarpIsAvailable() {
+        val profile = parser.parse(
+            "vless://11111111-1111-1111-1111-111111111111@example.com:443" +
+                "?security=reality&sni=apple.com&pbk=pubkey&flow=xtls-rprx-vision#Main"
+        )
+        val config = Json.parseToJsonElement(
+            builder.build(
+                profile,
+                SingBoxConfigSettings(
+                    warpEnabled = true,
+                    warpPrivateKey = "private",
+                    warpLocalAddressV4 = "172.16.0.2",
+                    warpPeerPublicKey = "peer",
+                    warpEndpoint = "162.159.192.1:2408"
+                )
+            )
+        ).jsonObject
+        val rules = config["route"]!!.jsonObject["rules"]!!.jsonArray.map { it.jsonObject }
+
+        assertTrue(rules.any {
+            it["domain_suffix"]?.jsonArray?.any { value ->
+                value.jsonPrimitive.content == "google.com"
+            } == true && it["outbound"]?.jsonPrimitive?.content == "warp"
+        })
+        assertTrue(rules.any {
+            it["network"]?.jsonPrimitive?.content == "udp" &&
+                it["outbound"]?.jsonPrimitive?.content == "warp"
+        })
+        assertFalse(rules.any {
+            it["action"]?.jsonPrimitive?.content == "reject"
+        })
+    }
+
+    private fun sampleProfile() = parser.parse(
+        "vless://11111111-1111-1111-1111-111111111111@example.com:443" +
+            "?security=reality&sni=apple.com&fp=chrome&pbk=pubkey&sid=abcd#Main"
+    )
 }

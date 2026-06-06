@@ -4,7 +4,7 @@
 # Requires: JDK 17+, jpackage (bundled with JDK), curl, tar
 set -euo pipefail
 
-VERSION="${1:-0.2.0}"
+VERSION="${1:-0.5.0}"
 VERSION="${VERSION#v}"
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"

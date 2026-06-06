@@ -80,7 +80,7 @@ jobs:
         run: |
           .\dev\ensure-sing-box.ps1 | Out-Null
           .\gradlew.bat :core:test :desktop:test :desktop:installDist
-          .\dev\package-windows.ps1 -Version "0.2.0" -SkipBuild
+          .\dev\package-windows.ps1 -Version "0.5.0" -SkipBuild
 
       - name: Upload installer
         uses: actions/upload-artifact@v4
@@ -118,7 +118,7 @@ jobs:
         run: |
           chmod +x dev/ensure-sing-box.sh dev/package-macos.sh
           ./gradlew :core:test :desktop:test :desktop:installDist
-          dev/package-macos.sh "0.2.0" "${{ matrix.arch }}"
+          dev/package-macos.sh "0.5.0" "${{ matrix.arch }}"
 
       - name: Upload DMG
         uses: actions/upload-artifact@v4
