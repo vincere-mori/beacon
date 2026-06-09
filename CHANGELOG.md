@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.5.3
+
+- Redesigned the app icon into a cleaner, flat geometric lighthouse with a softer light beam, regenerated for every platform (Windows `.ico`, macOS `.icns`, Linux, Android adaptive icon and the in-app/README logo).
+- Icon artwork is now generated from a single shared source (`dev/beacon_icon.py`) so desktop and Android never drift apart.
+
 ## v0.5.2
 
 - Desktop: TUN mode now starts in about a second instead of up to a minute.

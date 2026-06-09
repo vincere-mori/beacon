@@ -12,3 +12,4 @@ captures/
 *.log
 sing-box
 sing-box.exe
+__pycache__/
