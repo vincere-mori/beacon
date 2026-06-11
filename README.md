@@ -47,8 +47,7 @@
 ## Android
 
 <p align="center">
-  <img src=".assets/android-off.png" width="40%" alt="Маяк на Android - отключен">
-  <img src=".assets/android-on.png" width="40%" alt="Маяк на Android - подключен">
+  <img src=".assets/android.png" width="82%" alt="Маяк на Android">
 </p>
 
 ## Как начать

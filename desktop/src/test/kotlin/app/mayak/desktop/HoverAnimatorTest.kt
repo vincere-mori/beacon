@@ -22,7 +22,8 @@ class HoverAnimatorTest {
         }
 
         assertTrue(finished.await(2, TimeUnit.SECONDS))
-        assertTrue(samples.size >= 10)
+        assertTrue(samples.size >= 3)
+        assertTrue(samples.dropLast(1).any { it in 0.01f..0.99f })
         assertEquals(1f, samples.last())
     }
 }

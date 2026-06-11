@@ -427,14 +427,14 @@ private fun DrawScope.drawLhBulbGlow(
         ),
         center = Offset(cx, cy), radius = bulbR * 4f
     )
-    val lensSize = Size(bulbR * 3.5f, bulbR * 2.25f)
+    val lensSize = Size(bulbR * 3.2f, bulbR * 1.7f)
     val lensTopLeft = Offset(cx - lensSize.width / 2f, cy - lensSize.height / 2f)
     drawOval(
         brush = Brush.horizontalGradient(
             colors = listOf(
-                haloColor.copy(alpha = 0.22f * onAlpha),
-                coreColor.copy(alpha = 0.92f * onAlpha),
-                haloColor.copy(alpha = 0.22f * onAlpha)
+                haloColor.copy(alpha = 0.12f * onAlpha),
+                coreColor.copy(alpha = 0.7f * onAlpha),
+                haloColor.copy(alpha = 0.12f * onAlpha)
             ),
             startX = lensTopLeft.x,
             endX = lensTopLeft.x + lensSize.width
@@ -443,27 +443,33 @@ private fun DrawScope.drawLhBulbGlow(
         size = lensSize
     )
     drawOval(
-        color = Color(0xFFDCEEFF).copy(alpha = 0.88f),
+        color = Color(0xFFDCEEFF).copy(alpha = 0.68f),
         topLeft = lensTopLeft,
         size = lensSize,
         style = Stroke(1f)
     )
-    for (step in -2..2) {
-        val y = cy + step * lensSize.height / 6.5f
-        val halfWidth = lensSize.width * (0.44f - kotlin.math.abs(step) * 0.045f)
+    for (step in -1..1) {
+        val y = cy + step * lensSize.height / 4.5f
+        val halfWidth = lensSize.width * (0.43f - kotlin.math.abs(step) * 0.04f)
         drawLine(
-            color = Color.White.copy(alpha = 0.46f * onAlpha),
+            color = Color.White.copy(alpha = 0.28f * onAlpha),
             start = Offset(cx - halfWidth, y),
             end = Offset(cx + halfWidth, y),
-            strokeWidth = 0.9f,
+            strokeWidth = 0.7f,
             cap = StrokeCap.Round
         )
     }
-    drawCircle(coreColor, radius = bulbR * 0.78f, center = Offset(cx, cy))
-    drawCircle(
-        Color(1f, 1f, 1f, 0.9f),
-        radius = 1.7f,
-        center = Offset(cx - bulbR * 0.32f, cy - bulbR * 0.28f)
+    drawOval(
+        brush = Brush.radialGradient(
+            colors = listOf(
+                coreColor.copy(alpha = 0.5f * onAlpha),
+                coreColor.copy(alpha = 0f)
+            ),
+            center = Offset(cx, cy),
+            radius = lensSize.width * 0.42f
+        ),
+        topLeft = lensTopLeft,
+        size = lensSize
     )
 }
 

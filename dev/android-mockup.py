@@ -74,6 +74,10 @@ def nav_icon(d, name, cx, cy, color):
         d.ellipse([cx - s, cy - s, cx + s, cy + s], outline=color, width=7)
         d.ellipse([cx - s // 2, cy - s, cx + s // 2, cy + s], outline=color, width=6)
         d.line([cx - s, cy, cx + s, cy], fill=color, width=6)
+    elif name == "journal":
+        d.rounded_rectangle([cx - s + 6, cy - s, cx + s - 6, cy + s], 4, outline=color, width=7)
+        for y in (-13, 0, 13):
+            d.line([cx - 12, cy + y, cx + 13, cy + y], fill=color, width=5)
     elif name == "gear":
         d.ellipse([cx - s + 6, cy - s + 6, cx + s - 6, cy + s - 6], outline=color, width=7)
         d.ellipse([cx - 9, cy - 9, cx + 9, cy + 9], fill=color)
@@ -149,8 +153,14 @@ def screen(connected, hero_box, hero_src):
     ny = H - nh
     d.rectangle([0, ny, W, H], fill=BG_TOP)
     d.line([0, ny, W, ny], fill=(30, 42, 80), width=2)
-    tabs = [("home", "Главная"), ("key", "Ключи"), ("globe", "Подписки"), ("gear", "Настройки")]
-    seg = W // 4
+    tabs = [
+        ("home", "Главная"),
+        ("key", "Ключи"),
+        ("globe", "Подписки"),
+        ("journal", "Журнал"),
+        ("gear", "Настройки"),
+    ]
+    seg = W // len(tabs)
     for i, (icon, lab) in enumerate(tabs):
         cx = seg * i + seg // 2
         sel = i == 0
@@ -158,7 +168,7 @@ def screen(connected, hero_box, hero_src):
         if sel:
             d.rounded_rectangle([cx - 56, ny + 24, cx + 56, ny + 60], 18, fill=ACCENT)
         nav_icon(d, icon, cx, ny + 42, col)
-        d.text((cx, ny + 96), lab, font=fnt(26, "sb" if sel else "r"),
+        d.text((cx, ny + 96), lab, font=fnt(22, "sb" if sel else "r"),
                fill=ACCENT_LIGHT if sel else MUTED, anchor="mm")
     return cv
 
@@ -188,7 +198,22 @@ def bezel(screen_img):
 ON_BOX = (8, 84, 919, 422)
 OFF_BOX = (8, 92, 935, 424)
 
-bezel(screen(True, ON_BOX, ASSETS / "screenshot-on.png")).save(ASSETS / "android-on.png")
+on_phone = bezel(screen(True, ON_BOX, ASSETS / "screenshot-on.png"))
+off_phone = bezel(screen(False, OFF_BOX, ASSETS / "screenshot-off.png"))
+
+on_phone.save(ASSETS / "android-on.png")
 print("wrote android-on.png")
-bezel(screen(False, OFF_BOX, ASSETS / "screenshot-off.png")).save(ASSETS / "android-off.png")
+off_phone.save(ASSETS / "android-off.png")
 print("wrote android-off.png")
+
+canvas = Image.new("RGBA", (1600, 1100), (8, 13, 22, 255))
+phone_h = 1000
+phone_w = round(off_phone.width * phone_h / off_phone.height)
+off_small = off_phone.resize((phone_w, phone_h), Image.LANCZOS)
+on_small = on_phone.resize((phone_w, phone_h), Image.LANCZOS)
+gap = 70
+left = (canvas.width - phone_w * 2 - gap) // 2
+canvas.alpha_composite(off_small, (left, 50))
+canvas.alpha_composite(on_small, (left + phone_w + gap, 50))
+canvas.convert("RGB").save(ASSETS / "android.png", quality=95)
+print("wrote android.png")
