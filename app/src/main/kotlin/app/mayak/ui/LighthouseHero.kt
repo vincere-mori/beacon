@@ -359,22 +359,15 @@ private fun DrawScope.drawLhLighthouse(
         color = Color(0x96788CB4), topLeft = Offset(cx - lantW / 2f, lantTopY),
         size = Size(lantW, lantH), cornerRadius = CornerRadius(6f), style = Stroke(1f)
     )
-    listOf(-0.28f, 0f, 0.28f).forEach { offset ->
-        val x = cx + lantW * offset
+    listOf(-0.25f, 0f, 0.25f).forEach { offset ->
+        val x = (cx + lantW * offset).let { kotlin.math.round(it) }
         drawLine(
-            color = Color(0xAA788CB4),
+            color = Color(0xB8A7B9DC),
             start = Offset(x, lantTopY + 2f),
             end = Offset(x, lantTopY + lantH - 2f),
             strokeWidth = 1f
         )
     }
-    drawLine(
-        color = Color(1f, 1f, 1f, 0.18f),
-        start = Offset(cx - lantW * 0.34f, lantTopY + 3f),
-        end = Offset(cx - lantW * 0.16f, lantTopY + lantH - 3f),
-        strokeWidth = 1.4f,
-        cap = StrokeCap.Round
-    )
 
     val roofW = lantW * 1.18f
     val roofH = lantH * 1.05f
@@ -434,14 +427,14 @@ private fun DrawScope.drawLhBulbGlow(
         ),
         center = Offset(cx, cy), radius = bulbR * 4f
     )
-    val lensSize = Size(bulbR * 2.8f, bulbR * 1.9f)
+    val lensSize = Size(bulbR * 3.5f, bulbR * 2.25f)
     val lensTopLeft = Offset(cx - lensSize.width / 2f, cy - lensSize.height / 2f)
     drawOval(
         brush = Brush.horizontalGradient(
             colors = listOf(
-                haloColor.copy(alpha = 0.18f * onAlpha),
-                coreColor.copy(alpha = 0.82f * onAlpha),
-                haloColor.copy(alpha = 0.18f * onAlpha)
+                haloColor.copy(alpha = 0.22f * onAlpha),
+                coreColor.copy(alpha = 0.92f * onAlpha),
+                haloColor.copy(alpha = 0.22f * onAlpha)
             ),
             startX = lensTopLeft.x,
             endX = lensTopLeft.x + lensSize.width
@@ -450,24 +443,28 @@ private fun DrawScope.drawLhBulbGlow(
         size = lensSize
     )
     drawOval(
-        color = Color(0xFFCFE8FF).copy(alpha = 0.72f),
+        color = Color(0xFFDCEEFF).copy(alpha = 0.88f),
         topLeft = lensTopLeft,
         size = lensSize,
         style = Stroke(1f)
     )
     for (step in -2..2) {
-        val y = cy + step * lensSize.height / 7f
-        val halfWidth = lensSize.width * (0.42f - kotlin.math.abs(step) * 0.035f)
+        val y = cy + step * lensSize.height / 6.5f
+        val halfWidth = lensSize.width * (0.44f - kotlin.math.abs(step) * 0.045f)
         drawLine(
-            color = Color.White.copy(alpha = 0.34f * onAlpha),
+            color = Color.White.copy(alpha = 0.46f * onAlpha),
             start = Offset(cx - halfWidth, y),
             end = Offset(cx + halfWidth, y),
-            strokeWidth = 0.8f,
+            strokeWidth = 0.9f,
             cap = StrokeCap.Round
         )
     }
-    drawCircle(coreColor, radius = bulbR, center = Offset(cx, cy))
-    drawCircle(Color(1f, 1f, 1f, 0.86f), radius = 2f, center = Offset(cx - bulbR * 0.35f - 1f, cy - bulbR * 0.35f - 1f))
+    drawCircle(coreColor, radius = bulbR * 0.78f, center = Offset(cx, cy))
+    drawCircle(
+        Color(1f, 1f, 1f, 0.9f),
+        radius = 1.7f,
+        center = Offset(cx - bulbR * 0.32f, cy - bulbR * 0.28f)
+    )
 }
 
 private fun DrawScope.drawLhCliff(w: Float, h: Float) {
